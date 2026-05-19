@@ -35,8 +35,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { open } from '@tauri-apps/api/dialog';
-import { fetch } from '@tauri-apps/api/http';
+import { open } from '@tauri-apps/plugin-dialog';
+import { fetch } from '@tauri-apps/plugin-http';
 
 const selectedFile = ref('');
 const isProcessing = ref(false);
@@ -74,17 +74,17 @@ async function processFile() {
 
     const response = await fetch(`${API_URL}/process`, {
       method: 'POST',
-      body: {
-        type: 'Json',
-        payload: {
-          input_path: selectedFile.value,
-          output_dir: outputDir
-        }
+      body: JSON.stringify({
+        input_path: selectedFile.value,
+        output_dir: outputDir
+      }),
+      headers: {
+        'Content-Type': 'application/json'
       }
     });
 
     if (response.ok) {
-      const data = response.data as any;
+      const data = await response.json() as any;
       successPath.value = data.output_path;
     } else {
       error.value = `Server Error: ${response.status}`;
