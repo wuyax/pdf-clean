@@ -28,6 +28,12 @@
       
       <div v-if="successPath" class="mt-4 p-3 bg-green-100 text-green-700 rounded text-sm break-all">
         Success! Saved to:<br> {{ successPath }}
+        <button 
+          @click="openFile" 
+          class="mt-2 w-full bg-green-600 text-white py-1 px-3 rounded hover:bg-green-700 transition text-xs font-medium"
+        >
+          Open File
+        </button>
       </div>
     </div>
   </div>
@@ -37,6 +43,7 @@
 import { ref } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { fetch } from '@tauri-apps/plugin-http';
+import { openPath } from '@tauri-apps/plugin-opener';
 
 const selectedFile = ref('');
 const isProcessing = ref(false);
@@ -58,6 +65,16 @@ async function selectFile() {
     }
   } catch (err) {
     error.value = 'Failed to select file';
+  }
+}
+
+async function openFile() {
+  if (successPath.value) {
+    try {
+      await openPath(successPath.value);
+    } catch (err: any) {
+      error.value = `Failed to open file: ${err.message}`;
+    }
   }
 }
 
