@@ -42,7 +42,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
-import { fetch } from '@tauri-apps/plugin-http';
 import { openPath } from '@tauri-apps/plugin-opener';
 
 const selectedFile = ref('');
@@ -104,10 +103,12 @@ async function processFile() {
       const data = await response.json() as any;
       successPath.value = data.output_path;
     } else {
-      error.value = `Server Error: ${response.status}`;
+      const errorText = await response.text();
+      error.value = `Server Error: ${response.status} - ${errorText}`;
     }
   } catch (err: any) {
-    error.value = `Error: ${err.message}`;
+    console.error('Processing failed:', err);
+    error.value = `Error: ${err.message || JSON.stringify(err)}`;
   } finally {
     isProcessing.value = false;
   }
