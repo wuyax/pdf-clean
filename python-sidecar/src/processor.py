@@ -3,6 +3,7 @@ from pdf2image import convert_from_path
 from paddleocr import PaddleOCR
 import fitz  # PyMuPDF
 import io
+import numpy as np
 
 def process_pdf(input_path: str, output_path: str):
     # Initialize OCR (use English and Chinese)
@@ -20,7 +21,6 @@ def process_pdf(input_path: str, output_path: str):
         img.save(img_bytes, format="JPEG")
         img_bytes = img_bytes.getvalue()
         
-        import numpy as np
         img_np = np.array(img)
         result = ocr.ocr(img_np, cls=True)
         
