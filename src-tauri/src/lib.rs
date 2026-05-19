@@ -14,9 +14,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let shell = app.shell();
-            let sidecar = shell.sidecar("python-sidecar").map_err(|e| e.to_string())?;
-            let (_rx, _child) = sidecar.spawn().map_err(|e| e.to_string())?;
+            // let shell = app.shell();
+            // let sidecar = shell.sidecar("python-sidecar").map_err(|e| e.to_string())?;
+            // let (_rx, _child) = sidecar.spawn().map_err(|e| e.to_string())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet])
