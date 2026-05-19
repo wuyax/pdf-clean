@@ -21,6 +21,19 @@
       "csp": null
     }
   },
+  "tauri": {
+    "allowlist": {
+      "dialog": {
+        "all": true,
+        "open": true
+      },
+      "http": {
+        "all": true,
+        "request": true,
+        "scope": ["http://127.0.0.1:8000/*"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
