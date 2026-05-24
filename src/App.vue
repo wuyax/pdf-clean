@@ -1,81 +1,176 @@
 <!-- src/App.vue -->
 <template>
   <div 
-    class="min-h-screen bg-[#f5f5f7] flex flex-col font-system select-none overflow-hidden"
+    class="h-screen flex flex-col font-system select-none overflow-hidden text-slate-900 bg-white"
     @dragenter.prevent="onDragEnter"
     @dragleave.prevent="onDragLeave"
     @dragover.prevent
     @drop.prevent="onDrop"
   >
-    <!-- Custom Titlebar (Draggable) -->
+    <!-- Simplified Titlebar -->
     <header 
       data-tauri-drag-region
-      class="h-12 flex items-center justify-between px-4 bg-[#f5f5f7] border-b border-gray-200/60 sticky top-0 z-50 window-blur"
+      class="h-[30px] flex items-center px-4 border-b border-slate-200/60 bg-white z-50 shrink-0"
     >
-      <!-- Left side: Traffic lights space on Mac (approx 70px) + Title -->
-      <div class="flex items-center pl-[70px] pointer-events-none" data-tauri-drag-region>
-        <span class="text-sm font-semibold text-gray-800 tracking-wide">PDF OCR Cleaner</span>
-      </div>
-
-      <!-- Right side: Actions -->
-      <div class="flex gap-2 items-center z-10">
-        <button 
-          @click="selectFiles" 
-          :disabled="isGlobalProcessing"
-          class="px-3 py-1.5 bg-white border border-gray-200 rounded text-xs font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50 transition-colors shadow-sm"
-        >
-          添加文件
-        </button>
-        <button 
-          @click="startBatchProcessing" 
-          :disabled="isGlobalProcessing || !hasSelectedTasks"
-          class="px-3 py-1.5 bg-blue-500 border border-transparent rounded text-xs font-medium text-white hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
-        >
-          {{ isGlobalProcessing ? '正在处理...' : '开始清理' }}
-        </button>
+      <div class="flex items-center gap-2 pointer-events-none ml-[72px]" data-tauri-drag-region>
+        <span class="text-[11px] font-semibold text-slate-700">PDF OCR Cleaner</span>
+        <span class="text-[10px] text-slate-400 font-medium tracking-wide">v2.0</span>
       </div>
     </header>
 
-    <!-- Main Content Area -->
-    <main class="flex-1 overflow-y-auto relative">
-      <!-- Empty State -->
-      <div v-if="tasks.length === 0" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        <p class="text-gray-500 font-medium">将 PDF 文件拖放到此处</p>
-        <p class="text-xs text-gray-400 mt-1">或者点击右上角添加文件</p>
-      </div>
+    <div class="flex-1 flex overflow-hidden">
+      <!-- Sidebar / Control Center -->
+      <aside class="w-[260px] border-r border-slate-200/60 bg-slate-50/50 flex flex-col shrink-0">
+        <div class="flex-1 p-4 space-y-6 overflow-y-auto">
+          <!-- Main Actions -->
+          <div class="space-y-2">
+            <button 
+              @click="startBatchProcessing" 
+              :disabled="isGlobalProcessing || !hasSelectedTasks"
+              class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-lg text-[13px] font-semibold transition-all shadow-sm active:scale-[0.98]"
+            >
+              <svg v-if="!isGlobalProcessing" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              {{ isGlobalProcessing ? '正在处理...' : '开始清理' }}
+            </button>
+            
+            <div class="grid grid-cols-2 gap-2">
+              <button 
+                @click="selectFiles" 
+                :disabled="isGlobalProcessing"
+                class="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-lg text-[12px] font-medium text-slate-700 transition-all active:scale-[0.98]"
+              >
+                添加文件
+              </button>
+              <button 
+                @click="clearAll" 
+                :disabled="isGlobalProcessing || tasks.length === 0"
+                class="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-rose-200 hover:text-rose-600 rounded-lg text-[12px] font-medium text-slate-700 transition-all active:scale-[0.98]"
+              >
+                清空列表
+              </button>
+            </div>
+          </div>
 
-      <!-- Task List -->
-      <div v-else class="h-full">
+          <!-- Filter Section with Divider -->
+          <div class="space-y-4">
+            <div class="border-t border-slate-200/60 mx-1"></div>
+            
+            <div class="flex flex-col gap-2 px-1">
+              <button 
+                @click="toggleFilter('processing')"
+                class="flex items-center justify-between px-3 py-2 rounded-lg text-[12px] font-medium transition-all"
+                :class="filterStatus.includes('processing') ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-100'"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 rounded-full" :class="filterStatus.includes('processing') ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'"></div>
+                  处理中
+                </div>
+                <span class="text-[10px] font-bold opacity-60">{{ tasks.filter(t => t.status === 'processing').length }}</span>
+              </button>
+
+              <button 
+                @click="toggleFilter('pending')"
+                class="flex items-center justify-between px-3 py-2 rounded-lg text-[12px] font-medium transition-all"
+                :class="filterStatus.includes('pending') ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-500 hover:bg-slate-100'"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="w-1.5 h-1.5 rounded-full" :class="filterStatus.includes('pending') ? 'bg-slate-600' : 'bg-slate-300'"></div>
+                  待处理
+                </div>
+                <span class="text-[10px] font-bold opacity-60">{{ tasks.filter(t => t.status === 'idle' || t.status === 'scanning').length }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Global Progress (Visible during processing) -->
+          <div v-if="isGlobalProcessing || completedTaskCount > 0" class="space-y-3 bg-white/50 border border-slate-200/60 rounded-xl p-3">
+            <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-tight">
+              <span>总体进度</span>
+              <span>{{ completedTaskCount }}/{{ totalSelectedTaskCount }}</span>
+            </div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div 
+                class="h-full bg-blue-500 transition-all duration-500"
+                :style="{ width: `${globalProgress}%` }"
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Footer -->
+        <div class="p-4 border-t border-slate-200/60 bg-slate-50/80">
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-semibold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">Active</span>
+              <p class="text-[10px] text-slate-400 font-medium">PaddleOCR 3.5.0</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="flex-1 overflow-hidden relative flex flex-col bg-white">
+        <!-- Empty State -->
+        <div v-if="tasks.length === 0" class="flex-1 flex flex-col items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-700">
+          <div class="relative mb-6">
+            <div class="absolute inset-0 bg-blue-100 rounded-full blur-3xl opacity-30 animate-pulse"></div>
+            <div class="relative w-20 h-20 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center shadow-sm">
+              <svg class="w-10 h-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+          </div>
+          <p class="text-[15px] font-semibold text-slate-700 tracking-tight">准备好处理您的文档</p>
+          <p class="text-xs text-slate-400 mt-2 font-medium">将 PDF 文件拖放到此处或点击“添加文件”</p>
+        </div>
+
+        <!-- Task List -->
         <TaskTable 
-          :tasks="tasks" 
+          v-else 
+          :tasks="filteredTasks" 
           @toggle-all="toggleAll" 
+          @remove-task="removeTask"
         />
-      </div>
 
-      <!-- Global Drag Overlay -->
-      <div 
-        v-if="isDragging" 
-        class="absolute inset-0 bg-blue-500/10 backdrop-blur-sm border-2 border-blue-400 border-dashed m-2 rounded-lg flex items-center justify-center z-50 pointer-events-none transition-all duration-200"
-      >
-        <div class="bg-white/90 px-6 py-3 rounded-full shadow-lg backdrop-blur-md border border-white/20">
-          <p class="text-blue-600 font-medium tracking-wide">松开鼠标添加文件</p>
+        <!-- Global Drag Overlay -->
+        <Transition 
+          enter-active-class="transition duration-300 ease-out"
+          enter-from-class="opacity-0 scale-95"
+          enter-to-class="opacity-100 scale-100"
+          leave-active-class="transition duration-200 ease-in"
+          leave-from-class="opacity-100 scale-100"
+          leave-to-class="opacity-0 scale-95"
+        >
+          <div 
+            v-if="isDragging" 
+            class="absolute inset-4 bg-blue-600/5 backdrop-blur-[2px] border-2 border-blue-500/30 border-dashed rounded-2xl flex items-center justify-center z-50 pointer-events-none"
+          >
+            <div class="bg-white px-8 py-4 rounded-2xl shadow-2xl border border-slate-100 flex flex-col items-center gap-3">
+              <div class="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M12 4v16m8-8H4"></path></svg>
+              </div>
+              <p class="text-sm font-bold text-slate-800 tracking-tight">释放鼠标以添加 PDF</p>
+            </div>
+          </div>
+        </Transition>
+      </main>
+    </div>
+
+    <!-- Refined Status Bar -->
+    <footer class="h-8 border-t border-slate-200/60 bg-white flex items-center px-6 justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none shrink-0">
+      <div class="flex gap-6">
+        <div v-if="tasks.length > 0" class="flex items-center gap-2">
+          <div class="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+          <span>{{ tasks.length }} 个文件已载入</span>
+        </div>
+        <div v-if="error" class="flex items-center gap-1.5 text-rose-500">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <span>{{ error }}</span>
         </div>
       </div>
-    </main>
-
-    <!-- Status Bar -->
-    <footer class="h-8 border-t border-gray-200/60 bg-[#f5f5f7] flex items-center px-4 justify-between text-[11px] text-gray-500 select-none">
-      <div class="flex gap-4">
-        <span v-if="tasks.length > 0">共 {{ tasks.length }} 个文件</span>
-        <span v-if="error" class="text-red-500 flex items-center gap-1">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          {{ error }}
-        </span>
+      <div class="flex items-center gap-4">
+        <span class="hover:text-slate-600 transition-colors cursor-default tracking-normal lowercase font-medium italic">Powered by Impeccable Design</span>
       </div>
-      <div>基于 PaddleOCR 驱动</div>
     </footer>
   </div>
 </template>
@@ -102,15 +197,47 @@ const tasks = ref<Task[]>([]);
 const isGlobalProcessing = ref(false);
 const error = ref('');
 const isDragging = ref(false);
+const filterStatus = ref<string[]>([]); // 'processing', 'pending'
 let dragCounter = 0;
 
 const API_URL = 'http://127.0.0.1:8000';
+
+const filteredTasks = computed(() => {
+  if (filterStatus.value.length === 0) return tasks.value;
+  
+  return tasks.value.filter(t => {
+    if (filterStatus.value.includes('processing') && t.status === 'processing') return true;
+    if (filterStatus.value.includes('pending') && (t.status === 'idle' || t.status === 'scanning')) return true;
+    return false;
+  });
+});
+
+const totalSelectedTaskCount = computed(() => {
+  return tasks.value.filter(t => t.selected).length;
+});
+
+const completedTaskCount = computed(() => {
+  return tasks.value.filter(t => t.selected && t.status === 'completed').length;
+});
+
+const globalProgress = computed(() => {
+  if (totalSelectedTaskCount.value === 0) return 0;
+  return Math.round((completedTaskCount.value / totalSelectedTaskCount.value) * 100);
+});
 
 const hasSelectedTasks = computed(() => {
   return tasks.value.some(t => t.selected && t.status !== 'completed');
 });
 
-// Drag and drop handling
+function toggleFilter(status: string) {
+  const index = filterStatus.value.indexOf(status);
+  if (index === -1) {
+    filterStatus.value.push(status);
+  } else {
+    filterStatus.value.splice(index, 1);
+  }
+}
+
 function onDragEnter(e: DragEvent) {
   dragCounter++;
   if (e.dataTransfer?.types.includes('Files')) {
@@ -125,20 +252,12 @@ function onDragLeave() {
   }
 }
 
-async function onDrop(e: DragEvent) {
+async function onDrop(_e: DragEvent) {
   dragCounter = 0;
   isDragging.value = false;
-  
-  const files = e.dataTransfer?.files;
-  if (!files) return;
-
-  // In a real Tauri app, dropping files needs to be handled via Tauri events 
-  // because browser File API doesn't give absolute paths.
-  // We setup the listener below.
 }
 
 onMounted(async () => {
-  // Setup Tauri global file drop listener
   try {
     await listen('tauri://file-drop', (event: any) => {
       isDragging.value = false;
@@ -318,6 +437,15 @@ async function processSingleTask(task: Task) {
   }
 }
 
+function removeTask(path: string) {
+  tasks.value = tasks.value.filter(t => t.path !== path);
+}
+
+function clearAll() {
+  if (isGlobalProcessing.value) return;
+  tasks.value = [];
+}
+
 function toggleAll() {
   const target = !tasks.value.every(t => t.selected);
   tasks.value.forEach(t => {
@@ -331,29 +459,42 @@ function toggleAll() {
 <style>
 /* Native App Typography & Adjustments */
 .font-system {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Make custom titlebar blend with OS on Mac */
-.window-blur {
-  background: rgba(245, 245, 247, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+.animate-in {
+  animation-duration: 0.5s;
+  animation-fill-mode: both;
 }
 
-/* Hide scrollbar for a cleaner look but allow scrolling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-::-webkit-scrollbar-track {
+
+@keyframes zoom-in {
+  from { transform: scale(0.98); }
+  to { transform: scale(1); }
+}
+
+.fade-in { animation-name: fade-in; }
+.zoom-in { animation-name: zoom-in; }
+
+/* Scrollbar styling for sidebar */
+aside ::-webkit-scrollbar {
+  width: 4px;
+}
+
+aside ::-webkit-scrollbar-track {
   background: transparent;
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
+
+aside ::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 10px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
+
+aside ::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
 }
 </style>
