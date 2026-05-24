@@ -116,31 +116,51 @@ async function selectFiles() {
 
 async function scanFiles(targetTasks: Task[]) {
   const paths = targetTasks.map(t => t.path);
-  targetTasks.forEach(t => t.status = 'scanning');
+  
+  // Update status to scanning in the main tasks list
+  tasks.value.forEach(t => {
+    if (paths.includes(t.path)) {
+      t.status = 'scanning';
+    }
+  });
   
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // Increased to 60 seconds for OCR scan
+
     const response = await fetch(`${API_URL}/scan`, {
       method: 'POST',
       body: JSON.stringify({ file_paths: paths }),
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     if (response.ok) {
       const results = await response.json();
-      targetTasks.forEach(t => {
-        t.category = results[t.path] || 'UNKNOWN';
-        t.status = 'idle';
-        t.message = '准备就绪';
-        // Auto-select TYPE_2 and TYPE_4
-        t.selected = (t.category === 'TYPE_2' || t.category === 'TYPE_4');
+      tasks.value.forEach(t => {
+        if (paths.includes(t.path)) {
+          t.category = results[t.path] || 'UNKNOWN';
+          t.status = 'idle';
+          t.message = '准备就绪';
+          // Auto-select TYPE_2 and TYPE_4
+          t.selected = (t.category === 'TYPE_2' || t.category === 'TYPE_4');
+        }
       });
     } else {
       throw new Error(`Scan failed: ${response.status}`);
     }
   } catch (err: any) {
-    targetTasks.forEach(t => {
-      t.status = 'error';
-      t.message = '分析失败: ' + err.message;
+    tasks.value.forEach(t => {
+      if (paths.includes(t.path)) {
+        t.status = 'error';
+        if (err.name === 'AbortError') {
+          t.message = '分析超时 (后端 OCR 初始化较慢)';
+        } else {
+          t.message = '分析失败: ' + err.message;
+        }
+      }
     });
   }
 }
