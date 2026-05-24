@@ -15,7 +15,7 @@
         "title": "PDF OCR Cleaner",
         "width": 900,
         "height": 700,
-        "decorations": false,
+        "decorations": true,
         "transparent": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
