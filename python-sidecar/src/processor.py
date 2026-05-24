@@ -111,7 +111,7 @@ def insert_character_level_text(page, rect, text, fontname="china-ss", render_mo
             
         current_x += char_width
 
-def process_pdf(input_path: str, output_path: str):
+def process_pdf(input_path: str, output_path: str, progress_callback=None):
     """
     主处理流程：
     1. 将 PDF 页面渲染为高分辨率(200 DPI)图片用于背景。
@@ -125,11 +125,16 @@ def process_pdf(input_path: str, output_path: str):
     print(f"Dual-Res Processing: {input_path}")
     
     doc_src = fitz.open(input_path)
+    total_pages = len(doc_src)
     doc_out = fitz.open()
     
     try:
-        for page_num in range(len(doc_src)):
-            print(f"--- Page {page_num + 1}/{len(doc_src)} ---")
+        for page_num in range(total_pages):
+            current_page_display = page_num + 1
+            print(f"--- Page {current_page_display}/{total_pages} ---")
+            
+            if progress_callback:
+                progress_callback(current_page_display, total_pages, f"正在处理第 {current_page_display}/{total_pages} 页...")
             
             try:
                 page_src = doc_src[page_num]
