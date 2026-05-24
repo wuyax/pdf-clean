@@ -30,6 +30,12 @@ def test_classify_decoy_format(mock_exists):
     mock_doc.__getitem__.return_value = mock_page
     mock_doc.__len__.return_value = 1
     
+    # Mock a large background image to avoid the TYPE_1 fast path
+    mock_page.rect = MagicMock(width=500, height=800)
+    mock_page.get_images.return_value = [(123, 0, 500, 800, 8, 'RGB', '', 'img1', 'DCT', 0)]
+    mock_rect = MagicMock(width=500, height=800)
+    mock_page.get_image_rects.return_value = [mock_rect]
+
     with patch('fitz.open', return_value=mock_doc):
         category = classify_pdf("dummy.pdf")
         assert category == "TYPE_2" # Decoy

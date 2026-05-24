@@ -48,7 +48,31 @@ def classify_pdf(file_path: str) -> str:
         doc.close()
         return "TYPE_4"
     
-    # 2. Heuristic Check: Gibberish/Decoy detection
+    # 2. Fast Path: Image Density Analysis
+    # Scanned PDFs or Decoy PDFs almost always consist of a page-filling background image.
+    # Normal (Born-digital) PDFs usually have no background image or only small ones (logos).
+    page_area = page.rect.width * page.rect.height
+    has_large_background_image = False
+    
+    image_list = page.get_images()
+    for img in image_list:
+        xref = img[0]
+        rects = page.get_image_rects(xref)
+        for r in rects:
+            # If any image covers more than 70% of the page, it's a potential scanned/decoy candidate
+            if (r.width * r.height) / page_area > 0.7:
+                has_large_background_image = True
+                break
+        if has_large_background_image:
+            break
+            
+    # If no large background image is detected, it's highly likely a normal born-digital PDF.
+    # We can skip the expensive OCR sampling.
+    if not has_large_background_image:
+        doc.close()
+        return "TYPE_1"
+
+    # 3. Heuristic Check: Gibberish/Decoy detection
     # Heuristic A: Ratio of meaningful characters (Alphanumeric + Chinese)
     alphanumeric = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
     
