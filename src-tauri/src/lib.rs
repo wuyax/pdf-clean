@@ -1,13 +1,6 @@
-use tauri_plugin_shell::ShellExt;
+ use tauri::{Manager, TitleBarStyle};
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
@@ -15,12 +8,21 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
-            // let shell = app.shell();
-            // let sidecar = shell.sidecar("python-sidecar").map_err(|e| e.to_string())?;
-            // let (_rx, _child) = sidecar.spawn().map_err(|e| e.to_string())?;
+            // 获取主窗口
+            let main_window = app.get_webview_window("main").unwrap();
+
+            // 针对 macOS 的底层强制设置
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Runtime;
+                // 强制设置沉浸式样式
+                main_window.set_title_bar_style(TitleBarStyle::Overlay).ok();
+                // 强制隐藏标题文本
+                main_window.set_title("").ok();
+            }
+
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

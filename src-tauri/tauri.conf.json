@@ -12,12 +12,10 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "PDF OCR Cleaner",
         "width": 900,
         "height": 700,
-        "decorations": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "transparent": true
       }
     ],
