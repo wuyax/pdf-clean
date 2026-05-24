@@ -142,11 +142,23 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 # 0. 获取原始 PDF 页面真实的物理尺寸 (单位为 Points，即 72 DPI 下的尺寸)
                 rect_pts = page_src.rect
                 
-                # 1. 【高分辨率背景图】 (200 DPI)
-                # 这张图仅作为最终输出 PDF 的可见底层，以保证用户看到的高清质量。
-                # 【极其重要】：alpha=False 强制丢弃透明通道，确保拿到的是 3 通道 RGB 数据。
-                pix_bg = page_src.get_pixmap(dpi=200, alpha=False)
-                img_data = pix_bg.tobytes("jpg")
+                # 1. 【高分辨率背景图】 (300 DPI)
+                # 这张图作为最终输出 PDF 的可见底层。300 DPI 是清晰度与体积的最佳平衡点。
+                # 【极其重要】：alpha=False 强制丢弃透明通道。
+                pix_bg = page_src.get_pixmap(dpi=300, alpha=False)
+                
+                # 使用 PIL 进行高级 JPEG 压缩 (TinyJPG 风格)
+                img_pil = Image.frombytes("RGB", [pix_bg.width, pix_bg.height], pix_bg.samples)
+                img_bytes_io = io.BytesIO()
+                img_pil.save(
+                    img_bytes_io, 
+                    format="JPEG", 
+                    quality=85, 
+                    optimize=True, 
+                    progressive=True,
+                    subsampling=0 # 4:4:4 保持文字边缘锐利
+                )
+                img_data = img_bytes_io.getvalue()
                 
                 # 2. 【低分辨率 OCR 输入图】 (100 DPI)
                 # 采用 100 DPI 极大减小了交给 PaddleOCR 处理的图像尺寸，这是解决 20GB 内存溢出导致程序崩溃的秘诀！
