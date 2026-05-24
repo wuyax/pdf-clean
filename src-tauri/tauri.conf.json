@@ -16,9 +16,7 @@
         "width": 900,
         "height": 700,
         "decorations": true,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
