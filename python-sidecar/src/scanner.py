@@ -49,26 +49,31 @@ def classify_pdf(file_path: str) -> str:
         return "TYPE_4"
     
     # 2. Fast Path: Image Density Analysis
-    # Scanned PDFs or Decoy PDFs almost always consist of a page-filling background image.
+    # Scanned PDFs or Decoy PDFs almost always consist of page-filling images.
     # Normal (Born-digital) PDFs usually have no background image or only small ones (logos).
     page_area = page.rect.width * page.rect.height
-    has_large_background_image = False
+    total_image_area = 0
     
     image_list = page.get_images()
+    processed_xrefs = set()
+    
     for img in image_list:
         xref = img[0]
+        if xref in processed_xrefs: continue
+        processed_xrefs.add(xref)
+        
         rects = page.get_image_rects(xref)
         for r in rects:
-            # If any image covers more than 70% of the page, it's a potential scanned/decoy candidate
-            if (r.width * r.height) / page_area > 0.7:
-                has_large_background_image = True
-                break
-        if has_large_background_image:
-            break
+            total_image_area += (r.width * r.height)
             
-    # If no large background image is detected, it's highly likely a normal born-digital PDF.
-    # We can skip the expensive OCR sampling.
-    if not has_large_background_image:
+    # If the combined area of all images covers more than 40% of the page,
+    # it's a potential scanned/decoy candidate. We MUST do the deep check.
+    # Normal text PDFs rarely exceed 10-20% image coverage.
+    is_image_heavy = (total_image_area / page_area) > 0.4
+
+    # If it's NOT image-heavy AND it has a decent amount of text, 
+    # we trust it's a normal born-digital PDF.
+    if not is_image_heavy and len(text) > 50:
         doc.close()
         return "TYPE_1"
 
