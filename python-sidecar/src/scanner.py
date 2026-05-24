@@ -66,29 +66,25 @@ def classify_pdf(file_path: str) -> str:
         for r in rects:
             total_image_area += (r.width * r.height)
             
-    # If the combined area of all images covers more than 40% of the page,
-    # it's a potential scanned/decoy candidate. We MUST do the deep check.
-    # Normal text PDFs rarely exceed 10-20% image coverage.
-    is_image_heavy = (total_image_area / page_area) > 0.4
-
-    # If it's NOT image-heavy AND it has a decent amount of text, 
-    # we trust it's a normal born-digital PDF.
-    if not is_image_heavy and len(text) > 50:
-        doc.close()
-        return "TYPE_1"
-
+    # Refined Image Heavy definition: 
+    # Normal PDFs usually have < 5% image area (just logos/icons).
+    # Anything above 10% is suspicious enough to warrant deeper inspection.
+    is_image_heavy = (total_image_area / page_area) > 0.10
+    
     # 3. Heuristic Check: Gibberish/Decoy detection
     # Heuristic A: Ratio of meaningful characters (Alphanumeric + Chinese)
     alphanumeric = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
     
-    # Decoy detection: If the text is mostly symbols or has extremely low semantic density
+    # Decoy detection: 
     if len(text) > 0:
         density = len(alphanumeric) / len(text)
-        if density < 0.2:
+        # If it's image heavy but has very little text layer content, 
+        # it's almost certainly a decoy or a poor OCR.
+        if density < 0.25 or (is_image_heavy and len(text) < 300):
             doc.close()
             return "TYPE_2"
 
-    # 3. Advanced Check: Small-scale OCR Sampling (The Ultimate Truth)
+    # 4. Advanced Check: Small-scale OCR Sampling (The Ultimate Truth)
     # If we have text but aren't sure if it matches the image, we do a quick OCR check
     ocr = get_ocr_for_scan()
     if ocr:
@@ -113,16 +109,14 @@ def classify_pdf(file_path: str) -> str:
             pdf_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
             
             # Advanced Semantic Comparison:
-            # 1. Length ratio check
-            if len(ocr_clean) > 5 and len(pdf_clean) > 5:
-                len_ratio = min(len(ocr_clean), len(pdf_clean)) / max(len(ocr_clean), len(pdf_clean))
-                
-                # 2. Fuzzy similarity check
+            if len(ocr_clean) > 5:
+                # 1. Length ratio check: If OCR found 5x more text than the PDF layer, it's a decoy.
+                # 2. Fuzzy similarity check: If the small amount of text doesn't match the OCR.
+                len_ratio = len(pdf_clean) / len(ocr_clean)
                 sim_ratio = SequenceMatcher(None, ocr_clean, pdf_clean).ratio()
                 
                 # Decoy Detection:
-                # If similarity is very low, or if the length mismatch is extreme, it's a decoy
-                if sim_ratio < 0.25 or len_ratio < 0.2:
+                if sim_ratio < 0.35 or len_ratio < 0.3:
                     doc.close()
                     return "TYPE_2"
                 
