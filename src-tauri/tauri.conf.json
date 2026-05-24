@@ -12,9 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "temp-app",
-        "width": 800,
-        "height": 600
+        "title": "PDF OCR Cleaner",
+        "width": 900,
+        "height": 700,
+        "decorations": false,
+        "transparent": true,
+        "titleBarStyle": "overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

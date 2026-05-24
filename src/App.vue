@@ -1,62 +1,89 @@
 <!-- src/App.vue -->
 <template>
-  <div class="min-h-screen bg-gray-50 flex flex-col p-6 font-sans">
-    <div class="max-w-4xl mx-auto w-full">
-      <header class="flex justify-between items-center mb-8">
-        <div>
-          <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">PDF OCR Cleaner</h1>
-          <p class="text-gray-500 mt-1">智能清除干扰层，像素级还原清晰 PDF</p>
-        </div>
-        <div class="flex gap-3">
-          <button 
-            @click="selectFiles" 
-            :disabled="isGlobalProcessing"
-            class="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            添加文件
-          </button>
-          <button 
-            @click="startBatchProcessing" 
-            :disabled="isGlobalProcessing || !hasSelectedTasks"
-            class="px-4 py-2 bg-blue-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {{ isGlobalProcessing ? '正在处理...' : '开始清理' }}
-          </button>
-        </div>
-      </header>
-
-      <div v-if="tasks.length === 0" 
-           @click="selectFiles"
-           class="border-2 border-dashed border-gray-300 rounded-xl p-20 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group">
-        <div class="mb-4">
-          <svg class="mx-auto h-12 w-12 text-gray-400 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-        <p class="text-lg font-medium text-gray-900">拖入或选择 PDF 文件</p>
-        <p class="text-sm text-gray-500 mt-1">支持批量选择，智能识别干扰层模式</p>
+  <div 
+    class="min-h-screen bg-[#f5f5f7] flex flex-col font-system select-none overflow-hidden"
+    @dragenter.prevent="onDragEnter"
+    @dragleave.prevent="onDragLeave"
+    @dragover.prevent
+    @drop.prevent="onDrop"
+  >
+    <!-- Custom Titlebar (Draggable) -->
+    <header 
+      data-tauri-drag-region
+      class="h-12 flex items-center justify-between px-4 bg-[#f5f5f7] border-b border-gray-200/60 sticky top-0 z-50 window-blur"
+    >
+      <!-- Left side: Traffic lights space on Mac (approx 70px) + Title -->
+      <div class="flex items-center pl-[70px] pointer-events-none" data-tauri-drag-region>
+        <span class="text-sm font-semibold text-gray-800 tracking-wide">PDF OCR Cleaner</span>
       </div>
 
-      <TaskTable 
-        v-else 
-        :tasks="tasks" 
-        @toggle-all="toggleAll" 
-      />
+      <!-- Right side: Actions -->
+      <div class="flex gap-2 items-center z-10">
+        <button 
+          @click="selectFiles" 
+          :disabled="isGlobalProcessing"
+          class="px-3 py-1.5 bg-white border border-gray-200 rounded text-xs font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          添加文件
+        </button>
+        <button 
+          @click="startBatchProcessing" 
+          :disabled="isGlobalProcessing || !hasSelectedTasks"
+          class="px-3 py-1.5 bg-blue-500 border border-transparent rounded text-xs font-medium text-white hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {{ isGlobalProcessing ? '正在处理...' : '开始清理' }}
+        </button>
+      </div>
+    </header>
 
-      <div v-if="error" class="mt-6 p-4 bg-red-50 border-l-4 border-red-400 text-red-700 text-sm">
-        {{ error }}
+    <!-- Main Content Area -->
+    <main class="flex-1 overflow-y-auto relative">
+      <!-- Empty State -->
+      <div v-if="tasks.length === 0" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <p class="text-gray-500 font-medium">将 PDF 文件拖放到此处</p>
+        <p class="text-xs text-gray-400 mt-1">或者点击右上角添加文件</p>
       </div>
 
-      <footer class="mt-12 pt-8 border-t border-gray-200 text-center text-xs text-gray-400">
-        <p>基于 PaddleOCR 3.5.0 & PyMuPDF 驱动</p>
-      </footer>
-    </div>
+      <!-- Task List -->
+      <div v-else class="h-full">
+        <TaskTable 
+          :tasks="tasks" 
+          @toggle-all="toggleAll" 
+        />
+      </div>
+
+      <!-- Global Drag Overlay -->
+      <div 
+        v-if="isDragging" 
+        class="absolute inset-0 bg-blue-500/10 backdrop-blur-sm border-2 border-blue-400 border-dashed m-2 rounded-lg flex items-center justify-center z-50 pointer-events-none transition-all duration-200"
+      >
+        <div class="bg-white/90 px-6 py-3 rounded-full shadow-lg backdrop-blur-md border border-white/20">
+          <p class="text-blue-600 font-medium tracking-wide">松开鼠标添加文件</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="h-8 border-t border-gray-200/60 bg-[#f5f5f7] flex items-center px-4 justify-between text-[11px] text-gray-500 select-none">
+      <div class="flex gap-4">
+        <span v-if="tasks.length > 0">共 {{ tasks.length }} 个文件</span>
+        <span v-if="error" class="text-red-500 flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          {{ error }}
+        </span>
+      </div>
+      <div>基于 PaddleOCR 驱动</div>
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
+import { listen } from '@tauri-apps/api/event';
 import TaskTable from './components/TaskTable.vue';
 
 interface Task {
@@ -74,12 +101,91 @@ interface Task {
 const tasks = ref<Task[]>([]);
 const isGlobalProcessing = ref(false);
 const error = ref('');
+const isDragging = ref(false);
+let dragCounter = 0;
 
 const API_URL = 'http://127.0.0.1:8000';
 
 const hasSelectedTasks = computed(() => {
   return tasks.value.some(t => t.selected && t.status !== 'completed');
 });
+
+// Drag and drop handling
+function onDragEnter(e: DragEvent) {
+  dragCounter++;
+  if (e.dataTransfer?.types.includes('Files')) {
+    isDragging.value = true;
+  }
+}
+
+function onDragLeave() {
+  dragCounter--;
+  if (dragCounter === 0) {
+    isDragging.value = false;
+  }
+}
+
+async function onDrop(e: DragEvent) {
+  dragCounter = 0;
+  isDragging.value = false;
+  
+  const files = e.dataTransfer?.files;
+  if (!files) return;
+
+  // In a real Tauri app, dropping files needs to be handled via Tauri events 
+  // because browser File API doesn't give absolute paths.
+  // We setup the listener below.
+}
+
+onMounted(async () => {
+  // Setup Tauri global file drop listener
+  try {
+    await listen('tauri://file-drop', (event: any) => {
+      isDragging.value = false;
+      dragCounter = 0;
+      
+      const droppedPaths = event.payload as string[];
+      if (droppedPaths && droppedPaths.length > 0) {
+        const pdfPaths = droppedPaths.filter(p => p.toLowerCase().endsWith('.pdf'));
+        if (pdfPaths.length > 0) {
+          addTasksFromPaths(pdfPaths);
+        }
+      }
+    });
+
+    await listen('tauri://file-drop-hover', () => {
+      isDragging.value = true;
+    });
+
+    await listen('tauri://file-drop-cancelled', () => {
+      isDragging.value = false;
+      dragCounter = 0;
+    });
+  } catch (e) {
+    console.error("Failed to setup drag listeners", e);
+  }
+});
+
+async function addTasksFromPaths(paths: string[]) {
+  const newTasks = paths.map(path => ({
+    path,
+    name: path.split(/[/\\]/).pop() || path,
+    selected: true,
+    category: 'UNKNOWN',
+    status: 'idle' as const,
+    message: '等待扫描',
+    current_page: 0,
+    total_pages: 0
+  }));
+  
+  const existingPaths = new Set(tasks.value.map(t => t.path));
+  const filteredNewTasks = newTasks.filter(t => !existingPaths.has(t.path));
+  
+  tasks.value = [...tasks.value, ...filteredNewTasks];
+  if (filteredNewTasks.length > 0) {
+    await scanFiles(filteredNewTasks);
+  }
+}
 
 async function selectFiles() {
   try {
@@ -89,25 +195,7 @@ async function selectFiles() {
     });
     
     if (selected && Array.isArray(selected)) {
-      const newTasks = selected.map(path => ({
-        path,
-        name: path.split(/[/\\]/).pop() || path,
-        selected: true,
-        category: 'UNKNOWN',
-        status: 'idle' as const,
-        message: '等待扫描',
-        current_page: 0,
-        total_pages: 0
-      }));
-      
-      // Filter out already added paths
-      const existingPaths = new Set(tasks.value.map(t => t.path));
-      const filteredNewTasks = newTasks.filter(t => !existingPaths.has(t.path));
-      
-      tasks.value = [...tasks.value, ...filteredNewTasks];
-      if (filteredNewTasks.length > 0) {
-        await scanFiles(filteredNewTasks);
-      }
+      addTasksFromPaths(selected);
     }
   } catch (err) {
     error.value = '选择文件失败';
@@ -117,7 +205,6 @@ async function selectFiles() {
 async function scanFiles(targetTasks: Task[]) {
   const paths = targetTasks.map(t => t.path);
   
-  // Update status to scanning in the main tasks list
   tasks.value.forEach(t => {
     if (paths.includes(t.path)) {
       t.status = 'scanning';
@@ -126,7 +213,7 @@ async function scanFiles(targetTasks: Task[]) {
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // Increased to 60 seconds for OCR scan
+    const timeoutId = setTimeout(() => controller.abort(), 60000); 
 
     const response = await fetch(`${API_URL}/scan`, {
       method: 'POST',
@@ -144,7 +231,6 @@ async function scanFiles(targetTasks: Task[]) {
           t.category = results[t.path] || 'UNKNOWN';
           t.status = 'idle';
           t.message = '准备就绪';
-          // Auto-select TYPE_2 and TYPE_4
           t.selected = (t.category === 'TYPE_2' || t.category === 'TYPE_4');
         }
       });
@@ -156,7 +242,7 @@ async function scanFiles(targetTasks: Task[]) {
       if (paths.includes(t.path)) {
         t.status = 'error';
         if (err.name === 'AbortError') {
-          t.message = '分析超时 (后端 OCR 初始化较慢)';
+          t.message = '分析超时';
         } else {
           t.message = '分析失败: ' + err.message;
         }
@@ -197,7 +283,6 @@ async function processSingleTask(task: Task) {
       const data = await response.json();
       task.task_id = data.task_id;
       
-      // Setup SSE
       await new Promise((resolve) => {
         const eventSource = new EventSource(`${API_URL}/stream/${task.task_id}`);
         
@@ -214,12 +299,10 @@ async function processSingleTask(task: Task) {
           }
         };
         
-        eventSource.onerror = (e) => {
-          console.error('SSE Error:', e);
-          // Only error out if we haven't finished
+        eventSource.onerror = (_e) => {
           if (task.status !== 'completed') {
             task.status = 'error';
-            task.message = '进度流中断';
+            task.message = '流中断';
           }
           eventSource.close();
           resolve(false);
@@ -227,7 +310,7 @@ async function processSingleTask(task: Task) {
       });
     } else {
       task.status = 'error';
-      task.message = `后端错误: ${response.status}`;
+      task.message = `HTTP ${response.status}`;
     }
   } catch (err: any) {
     task.status = 'error';
@@ -246,10 +329,31 @@ function toggleAll() {
 </script>
 
 <style>
-/* Ensure smooth transitions for progress bars */
-.transition-all {
-  transition-property: all;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 300ms;
+/* Native App Typography & Adjustments */
+.font-system {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Make custom titlebar blend with OS on Mac */
+.window-blur {
+  background: rgba(245, 245, 247, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Hide scrollbar for a cleaner look but allow scrolling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
 }
 </style>
