@@ -136,7 +136,9 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
             print(f"--- Page {current_page_display}/{total_pages} ---")
             
             if progress_callback:
-                progress_callback(current_page_display, total_pages, f"正在处理第 {current_page_display}/{total_pages} 页...")
+                # 使用 page_num (从0开始) 代表“已经完成的页数”
+                # 这样对于 1/1 的情况，进度条会停留在 0% 直到全部完成跳转到“已优化”
+                progress_callback(page_num, total_pages, f"正在处理第 {current_page_display}/{total_pages} 页...")
             
             try:
                 page_src = doc_src[page_num]
