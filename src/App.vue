@@ -94,7 +94,7 @@ async function selectFiles() {
         name: path.split(/[/\\]/).pop() || path,
         selected: true,
         category: 'UNKNOWN',
-        status: 'idle',
+        status: 'idle' as const,
         message: '等待扫描',
         current_page: 0,
         total_pages: 0
