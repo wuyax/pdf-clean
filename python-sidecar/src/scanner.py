@@ -2,14 +2,27 @@
 import fitz
 import re
 import os
+import numpy as np
+from difflib import SequenceMatcher
+
+def get_ocr_for_scan():
+    """
+    Lazy load OCR specifically for scanning. 
+    We use the shared instance from processor if available.
+    """
+    try:
+        from processor import get_ocr
+        return get_ocr()
+    except Exception:
+        return None
 
 def classify_pdf(file_path: str) -> str:
     """
     Classifies a PDF file into one of four categories:
-    - TYPE_1: Normal PDF (Valid text layer) -> DO NOT AUTO-SELECT
-    - TYPE_2: Decoy/Hidden Text PDF -> AUTO-SELECT
-    - TYPE_3: PDF with valid OCR -> DO NOT AUTO-SELECT
-    - TYPE_4: Pure Image PDF -> AUTO-SELECT
+    - TYPE_1: Normal PDF (Valid text layer)
+    - TYPE_2: Decoy/Hidden Text PDF (Gibberish or mismatched text)
+    - TYPE_3: PDF with valid OCR (Matches image content)
+    - TYPE_4: Pure Image PDF (No text layer)
     """
     if not os.path.exists(file_path):
         return "TYPE_UNKNOWN"
@@ -27,29 +40,67 @@ def classify_pdf(file_path: str) -> str:
     page_idx = 1 if len(doc) > 1 else 0
     page = doc[page_idx]
     
-    # 1. Extract raw text
+    # 1. Primary Check: Text Layer Content
     text = page.get_text("text").strip()
     
-    # TYPE 4: Pure Image
-    if len(text) < 10:
+    # TYPE 4: Pure Image (Extremely low character count)
+    if len(text) < 5:
         doc.close()
         return "TYPE_4"
     
-    # TYPE 2: Decoy Heuristics
-    # Heuristic A: High ratio of non-alphanumeric characters
-    # We include Chinese characters in the 'good' count
+    # 2. Heuristic Check: Gibberish/Decoy detection
+    # Heuristic A: Ratio of meaningful characters (Alphanumeric + Chinese)
     alphanumeric = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
     
-    # If the text is mostly whitespace, punctuation, or control chars, it's likely a decoy
+    # Decoy detection: If the text is mostly symbols or has extremely low semantic density
     if len(text) > 0:
-        ratio = len(alphanumeric) / len(text)
-        if ratio < 0.3:
+        density = len(alphanumeric) / len(text)
+        if density < 0.2:
             doc.close()
             return "TYPE_2"
+
+    # 3. Advanced Check: Small-scale OCR Sampling (The Ultimate Truth)
+    # If we have text but aren't sure if it matches the image, we do a quick OCR check
+    ocr = get_ocr_for_scan()
+    if ocr:
+        # Get a low-DPI pixmap for fast processing
+        pix = page.get_pixmap(dpi=72, alpha=False)
+        img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3).copy()
+        img_np = img_np[:, :, ::-1] # RGB to BGR
+        
+        # Run OCR
+        res = ocr.ocr(img_np)
+        
+        if res and res[0]:
+            # Extract OCR text
+            text_blocks = []
+            if hasattr(res[0], '__contains__') and 'rec_texts' in res[0]:
+                text_blocks = res[0]['rec_texts']
+            elif isinstance(res[0], list):
+                text_blocks = [line[1][0] for line in res[0]]
             
-    # Heuristic B: Check for overlapping or suspicious text blocks
-    # (Simplified for now: if it passes the ratio test and has significant text, 
-    # we assume it's Type 1 or Type 3 which we don't need to process)
-    
+            ocr_text = "".join(text_blocks)
+            ocr_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', ocr_text)
+            pdf_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
+            
+            # Advanced Semantic Comparison:
+            # 1. Length ratio check
+            if len(ocr_clean) > 5 and len(pdf_clean) > 5:
+                len_ratio = min(len(ocr_clean), len(pdf_clean)) / max(len(ocr_clean), len(pdf_clean))
+                
+                # 2. Fuzzy similarity check
+                sim_ratio = SequenceMatcher(None, ocr_clean, pdf_clean).ratio()
+                
+                # Decoy Detection:
+                # If similarity is very low, or if the length mismatch is extreme, it's a decoy
+                if sim_ratio < 0.25 or len_ratio < 0.2:
+                    doc.close()
+                    return "TYPE_2"
+                
+                # If similarity is high, it's a valid text/OCR PDF
+                if sim_ratio > 0.8:
+                    doc.close()
+                    return "TYPE_3"
+
     doc.close()
     return "TYPE_1"
