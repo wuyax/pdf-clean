@@ -8,6 +8,8 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import fitz  # PyMuPDF, 用于 PDF 读写和渲染
 import numpy as np
 import gc
+from PIL import Image
+import io
 
 # 全局单例的 OCR 引擎实例，避免每处理一页就重新加载模型
 ocr_instance = None
