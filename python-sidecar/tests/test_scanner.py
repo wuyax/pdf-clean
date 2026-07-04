@@ -55,3 +55,31 @@ def test_classify_decoy_format(mock_exists):
          patch('scanner.get_ocr_for_scan', return_value=mock_ocr):
         category = classify_pdf("dummy.pdf")
         assert category == "TYPE_2" # Decoy
+
+@patch('os.path.exists', return_value=True)
+def test_classify_decoy_with_empty_ocr(mock_exists):
+    mock_doc = MagicMock()
+    mock_page = MagicMock()
+    mock_page.get_text.return_value = "secret decoy text layer here" # 28 chars
+    mock_doc.__getitem__.return_value = mock_page
+    mock_doc.__len__.return_value = 1
+    
+    mock_page.rect = MagicMock(width=500, height=800)
+    # 1 image with large area to satisfy is_image_heavy
+    mock_page.get_images.return_value = [(123, 0, 500, 800, 8, 'RGB', '', 'img1', 'DCT', 0)]
+    mock_page.get_image_rects.return_value = [MagicMock(width=500, height=800)]
+
+    # Mock OCR returning nothing
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [[[[[0, 0], [10, 0], [10, 10], [0, 10]], ('', 0.0)]]]
+    
+    mock_pix = MagicMock()
+    mock_pix.width = 100
+    mock_pix.height = 100
+    mock_pix.samples = b'\x00' * (100 * 100 * 3)
+    mock_page.get_pixmap.return_value = mock_pix
+
+    with patch('fitz.open', return_value=mock_doc), \
+         patch('scanner.get_ocr_for_scan', return_value=mock_ocr):
+        category = classify_pdf("dummy.pdf")
+        assert category == "TYPE_2"

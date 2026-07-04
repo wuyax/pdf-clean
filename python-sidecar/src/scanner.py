@@ -122,6 +122,11 @@ def classify_pdf(file_path: str) -> str:
                     if sim_ratio > 0.7:
                         doc.close()
                         return "TYPE_3"
+                elif len(pdf_clean) > 20:
+                    # OCR detected almost nothing (<= 5 chars) but the PDF text layer has significant text (> 20 chars).
+                    # This indicates hidden/decoy text on an image.
+                    doc.close()
+                    return "TYPE_2"
 
     # Default to TYPE_1 for all other natural/mixed documents
     doc.close()
