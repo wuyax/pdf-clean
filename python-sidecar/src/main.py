@@ -107,24 +107,27 @@ def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
 @app.get("/stream/{task_id}")
 async def stream_progress(task_id: str):
     async def event_generator():
-        while True:
-            if task_id not in tasks_status:
+        try:
+            while True:
+                if task_id not in tasks_status:
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({"status": "not_found", "message": "Task not found"})
+                    }
+                    break
+                
+                data = tasks_status[task_id]
                 yield {
                     "event": "message",
-                    "data": json.dumps({"status": "not_found", "message": "Task not found"})
+                    "data": json.dumps(data)
                 }
-                break
-            
-            data = tasks_status[task_id]
-            yield {
-                "event": "message",
-                "data": json.dumps(data)
-            }
-            
-            if data["status"] in ["completed", "error"]:
-                break
                 
-            await asyncio.sleep(0.5)
+                if data["status"] in ["completed", "error"]:
+                    break
+                    
+                await asyncio.sleep(0.5)
+        finally:
+            tasks_status.pop(task_id, None)
             
     return EventSourceResponse(event_generator())
 
