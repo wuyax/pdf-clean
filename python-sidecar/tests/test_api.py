@@ -27,3 +27,41 @@ def test_process_endpoint(mock_process, mock_exists):
     assert response.status_code == 200
     assert "task_id" in response.json()
     assert response.json()["output_path"] == "/tmp/dummy_clean.pdf"
+
+
+def test_stream_progress_cleanup():
+    from src.main import tasks_status
+    
+    task_id = 'test-task-123'
+    tasks_status[task_id] = {
+        'status': 'completed',
+        'current_page': 1,
+        'total_pages': 1,
+        'message': 'Done',
+        'output_path': 'dummy_clean.pdf'
+    }
+    
+    response = client.get(f'/stream/{task_id}')
+    assert response.status_code == 200
+    
+    lines = list(response.iter_lines())
+    assert len(lines) > 0
+    
+    assert task_id not in tasks_status
+
+
+def test_tasks_status_capping():
+    from src.main import tasks_status, run_process_task
+    
+    tasks_status.clear()
+    for i in range(100):
+        tasks_status[f'task-{i}'] = {'status': 'completed'}
+        
+    assert len(tasks_status) == 100
+    
+    with patch('src.main.process_pdf'):
+        run_process_task('task-100', 'dummy.pdf', 'dummy_clean.pdf')
+        
+    assert len(tasks_status) == 100
+    assert 'task-0' not in tasks_status
+    assert 'task-100' in tasks_status
