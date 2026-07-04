@@ -26,7 +26,7 @@
           <div class="space-y-2">
             <button
               @click="startBatchProcessing"
-              :disabled="isGlobalProcessing || !hasSelectedTasks"
+              :disabled="isGlobalProcessing || !hasSelectedTasks || (saveMode === 'custom-dir' && !customOutputDir)"
               class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-lg text-[13px] font-semibold transition-all shadow-sm active:scale-[0.98]"
             >
               <Zap v-if="!isGlobalProcessing" class="w-4 h-4" :stroke-width="2.5" />
@@ -470,6 +470,11 @@ async function scanFiles(targetTasks: Task[]) {
 }
 
 async function startBatchProcessing() {
+  if (saveMode.value === 'custom-dir' && !customOutputDir.value) {
+    error.value = '请选择自定义保存目录';
+    return;
+  }
+
   const pendingTasks = tasks.value.filter(t => t.selected && t.status !== 'completed');
   if (pendingTasks.length === 0) return;
 
@@ -493,7 +498,13 @@ async function processSingleTask(task: Task) {
       outputDir = customOutputDir.value;
     } else {
       const lastSlash = Math.max(task.path.lastIndexOf('/'), task.path.lastIndexOf('\\'));
-      outputDir = task.path.substring(0, lastSlash);
+      if (lastSlash === 0) {
+        outputDir = task.path.substring(0, 1); // "/" or "\\"
+      } else if (lastSlash > 0) {
+        outputDir = task.path.substring(0, lastSlash);
+      } else {
+        outputDir = '.'; // Local folder indicator
+      }
     }
 
     const response = await fetch(`${API_URL}/process`, {

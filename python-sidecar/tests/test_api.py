@@ -72,6 +72,25 @@ def test_process_path_traversal_escape(mock_process, mock_isdir, mock_isfile, mo
         assert response.json()["detail"] == "Path traversal attempt detected" 
 
 
+@patch("src.main.os.path.exists", return_value=True)
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir", return_value=True)
+@patch("src.main.process_pdf")
+def test_process_path_traversal_sibling_bypass(mock_process, mock_isdir, mock_isfile, mock_exists):
+    # Try to output to /tmp/safe-sibling/dummy_clean.pdf when output_dir is /tmp/safe
+    def mock_abspath(path):
+        if "clean" in path:
+            return "/tmp/safe-sibling/dummy_clean.pdf"
+        if "dummy.pdf" in path:
+            return "/tmp/safe/dummy.pdf"
+        return "/tmp/safe"
+
+    with patch("src.main.os.path.abspath", side_effect=mock_abspath):
+        response = client.post("/process", json={"input_path": "dummy.pdf", "output_dir": "/tmp/safe"})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Path traversal attempt detected"
+
+
 def test_stream_progress_cleanup():
     from src.main import tasks_status
     

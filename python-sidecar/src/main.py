@@ -133,8 +133,8 @@ def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
         output_filename = f"{name}_clean{ext}"
         output_path = os.path.abspath(os.path.join(output_dir, output_filename))
         
-    # Assert path traversal protection: output file must reside inside target output directory
-    if not output_path.startswith(output_dir):
+    output_dir_prefix = output_dir if output_dir.endswith(os.sep) else output_dir + os.sep
+    if not output_path.startswith(output_dir_prefix):
         raise HTTPException(status_code=400, detail="Path traversal attempt detected")
         
     task_id = str(uuid.uuid4())

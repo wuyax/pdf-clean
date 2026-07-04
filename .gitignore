@@ -33,3 +33,5 @@ env/
 
 .agents/
 .vscode/
+plans/
+docs/
