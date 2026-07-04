@@ -7,19 +7,28 @@ sys.modules['paddleocr'] = MagicMock()
 
 from src.processor import process_pdf
 
-@patch('src.processor.convert_from_path')
-@patch('src.processor.ocr')
 @patch('src.processor.fitz')
-def test_process_pdf(mock_fitz, mock_ocr, mock_convert, tmp_path):
+@patch('src.processor.get_ocr')
+def test_process_pdf(mock_get_ocr, mock_fitz, tmp_path):
     # Arrange
-    mock_img = MagicMock()
-    mock_img.size = (800, 600)
-    mock_convert.return_value = [mock_img] # 1 page
-    
+    mock_ocr = MagicMock()
+    mock_get_ocr.return_value = mock_ocr
     mock_ocr.ocr.return_value = [[[[[0, 0], [10, 0], [10, 10], [0, 10]], ('test', 0.99)]]]
     
     mock_doc = MagicMock()
     mock_fitz.open.return_value = mock_doc
+    mock_doc.__len__.return_value = 1
+    
+    mock_page = MagicMock()
+    mock_doc.__getitem__.return_value = mock_page
+    mock_page.rect = MagicMock(width=500, height=800)
+    
+    # Mock PyMuPDF get_pixmap
+    mock_pix = MagicMock()
+    mock_pix.width = 100
+    mock_pix.height = 100
+    mock_pix.samples = b'\x00' * (100 * 100 * 3) # Mock RGB bytes
+    mock_page.get_pixmap.return_value = mock_pix
     
     input_pdf = tmp_path / "input.pdf"
     input_pdf.write_text("dummy")
@@ -30,6 +39,6 @@ def test_process_pdf(mock_fitz, mock_ocr, mock_convert, tmp_path):
     
     # Assert
     assert result == str(output_pdf)
-    mock_convert.assert_called_once()
+    mock_get_ocr.assert_called_once()
     mock_ocr.ocr.assert_called_once()
     mock_doc.save.assert_called_once()
