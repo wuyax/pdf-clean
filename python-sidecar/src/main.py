@@ -63,6 +63,12 @@ def scan_endpoint(req: ScanRequest):
     return results
 
 def run_process_task(task_id: str, input_path: str, output_path: str):
+    # Cap size to prevent memory leaks if streams are never opened
+    if len(tasks_status) >= 100:
+        # Remove oldest task (first key in insertion order)
+        oldest_key = next(iter(tasks_status))
+        tasks_status.pop(oldest_key, None)
+
     tasks_status[task_id] = {
         "status": "processing",
         "current_page": 0,
