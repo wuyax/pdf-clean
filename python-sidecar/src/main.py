@@ -45,6 +45,8 @@ tasks_status = {}
 class ProcessRequest(BaseModel):
     input_path: str
     output_dir: str
+    conflict_policy: str = "overwrite" # "overwrite" or "rename"
+
 
 class ProcessResponse(BaseModel):
     task_id: str
@@ -112,9 +114,20 @@ def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
         
     filename = os.path.basename(input_path)
     name, ext = os.path.splitext(filename)
-    output_filename = f"{name}_clean{ext}"
-    output_path = os.path.abspath(os.path.join(output_dir, output_filename))
     
+    if req.conflict_policy == "rename":
+        counter = 0
+        while True:
+            suffix = f"_clean_{counter}" if counter > 0 else "_clean"
+            output_filename = f"{name}{suffix}{ext}"
+            output_path = os.path.abspath(os.path.join(output_dir, output_filename))
+            if not os.path.exists(output_path):
+                break
+            counter += 1
+    else:
+        output_filename = f"{name}_clean{ext}"
+        output_path = os.path.abspath(os.path.join(output_dir, output_filename))
+        
     # Assert path traversal protection: output file must reside inside target output directory
     if not output_path.startswith(output_dir):
         raise HTTPException(status_code=400, detail="Path traversal attempt detected")
@@ -144,6 +157,8 @@ async def stream_progress(task_id: str):
                 }
                 
                 if data["status"] in ["completed", "error"]:
+                    # Wait 1.0 second to allow the client to receive the final message and close the connection
+                    await asyncio.sleep(1.0)
                     break
                     
                 await asyncio.sleep(0.5)

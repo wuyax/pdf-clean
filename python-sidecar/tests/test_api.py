@@ -108,3 +108,29 @@ def test_tasks_status_capping():
     assert len(tasks_status) == 100
     assert 'task-0' not in tasks_status
     assert 'task-100' in tasks_status
+
+
+@patch("src.main.os.path.exists")
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir", return_value=True)
+@patch("src.main.process_pdf")
+def test_process_endpoint_conflict_rename(mock_process, mock_isdir, mock_isfile, mock_exists):
+    # Simulate first _clean.pdf exists, but _clean_1.pdf does not
+    def exists_side_effect(path):
+        if path.endswith("_clean.pdf"):
+            return True
+        if path.endswith("_clean_1.pdf"):
+            return False
+        return True
+        
+    mock_exists.side_effect = exists_side_effect
+    
+    # We test that renaming works
+    response = client.post("/process", json={
+        "input_path": "dummy.pdf",
+        "output_dir": "/tmp",
+        "conflict_policy": "rename"
+    })
+    assert response.status_code == 200
+    assert response.json()["output_path"] == os.path.abspath("/tmp/dummy_clean_1.pdf")
+
