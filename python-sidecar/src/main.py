@@ -8,6 +8,8 @@ import uuid
 import sys
 import json
 import asyncio
+from typing import Literal
+
 
 # Ensure current and parent directories are in path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +47,8 @@ tasks_status = {}
 class ProcessRequest(BaseModel):
     input_path: str
     output_dir: str
-    conflict_policy: str = "overwrite" # "overwrite" or "rename"
+    conflict_policy: Literal["overwrite", "rename"] = "overwrite"
+
 
 
 class ProcessResponse(BaseModel):
@@ -117,13 +120,15 @@ def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
     
     if req.conflict_policy == "rename":
         counter = 0
-        while True:
+        while counter < 1000:
             suffix = f"_clean_{counter}" if counter > 0 else "_clean"
             output_filename = f"{name}{suffix}{ext}"
             output_path = os.path.abspath(os.path.join(output_dir, output_filename))
             if not os.path.exists(output_path):
                 break
             counter += 1
+        else:
+            raise HTTPException(status_code=409, detail="Could not generate a unique filename after 1000 attempts")
     else:
         output_filename = f"{name}_clean{ext}"
         output_path = os.path.abspath(os.path.join(output_dir, output_filename))
@@ -157,8 +162,6 @@ async def stream_progress(task_id: str):
                 }
                 
                 if data["status"] in ["completed", "error"]:
-                    # Wait 1.0 second to allow the client to receive the final message and close the connection
-                    await asyncio.sleep(1.0)
                     break
                     
                 await asyncio.sleep(0.5)

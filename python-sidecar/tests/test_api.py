@@ -134,3 +134,35 @@ def test_process_endpoint_conflict_rename(mock_process, mock_isdir, mock_isfile,
     assert response.status_code == 200
     assert response.json()["output_path"] == os.path.abspath("/tmp/dummy_clean_1.pdf")
 
+
+@patch("src.main.os.path.exists", return_value=True)
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir", return_value=True)
+@patch("src.main.process_pdf")
+def test_process_endpoint_conflict_policy_validation(mock_process, mock_isdir, mock_isfile, mock_exists):
+    # Invalid conflict policy should fail validation with 422
+    response = client.post("/process", json={
+        "input_path": "dummy.pdf",
+        "output_dir": "/tmp",
+        "conflict_policy": "invalid_policy"
+    })
+    assert response.status_code == 422
+
+    # Valid policy "overwrite" should pass
+    response_overwrite = client.post("/process", json={
+        "input_path": "dummy.pdf",
+        "output_dir": "/tmp",
+        "conflict_policy": "overwrite"
+    })
+    assert response_overwrite.status_code == 200
+
+    # Valid policy "rename" should fail with 409 becauseexists is always True (1000 limit)
+    response_rename = client.post("/process", json={
+        "input_path": "dummy.pdf",
+        "output_dir": "/tmp",
+        "conflict_policy": "rename"
+    })
+    assert response_rename.status_code == 409
+    assert response_rename.json()["detail"] == "Could not generate a unique filename after 1000 attempts"
+
+
