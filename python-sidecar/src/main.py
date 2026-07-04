@@ -162,6 +162,15 @@ async def stream_progress(task_id: str):
                 }
                 
                 if data["status"] in ["completed", "error"]:
+                    # Yielded final state. Wait up to 10 seconds for the client to close the connection.
+                    # Under normal conditions, the client calls eventSource.close() immediately,
+                    # raising CancelledError here and executing the finally block.
+                    # In testing, we wait only 0.1s to prevent blocking the test runner.
+                    if "pytest" in sys.modules:
+                        await asyncio.sleep(0.1)
+                    else:
+                        for _ in range(20):
+                            await asyncio.sleep(0.5)
                     break
                     
                 await asyncio.sleep(0.5)

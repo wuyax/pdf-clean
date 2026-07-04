@@ -103,12 +103,12 @@ def test_stream_progress_cleanup():
         'output_path': 'dummy_clean.pdf'
     }
     
-    response = client.get(f'/stream/{task_id}')
-    assert response.status_code == 200
-    
-    lines = list(response.iter_lines())
-    assert len(lines) > 0
-    
+    with client.stream("GET", f'/stream/{task_id}') as response:
+        assert response.status_code == 200
+        iterator = response.iter_lines()
+        first_line = next(iterator)
+        assert len(first_line) > 0
+        
     assert task_id not in tasks_status
 
 

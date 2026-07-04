@@ -541,15 +541,12 @@ async function processSingleTask(task: Task) {
         };
 
         eventSource.onerror = (_e) => {
-          // Defer checking status to allow pending onmessage events to execute first
-          setTimeout(() => {
-            if (task.status !== 'completed' && task.status !== 'error') {
-              task.status = 'error';
-              task.message = '流中断';
-              eventSource.close();
-              resolve(false);
-            }
-          }, 100);
+          if (task.status !== 'completed') {
+            task.status = 'error';
+            task.message = '流中断';
+          }
+          eventSource.close();
+          resolve(false);
         };
       });
     } else {
