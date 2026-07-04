@@ -87,6 +87,59 @@
             </div>
           </div>
 
+          <!-- Save Settings Card -->
+          <div class="space-y-4 bg-white/50 border border-slate-200/60 rounded-xl p-3">
+            <div class="text-[11px] font-bold text-slate-500 uppercase tracking-tight">保存设置</div>
+            
+            <!-- Save Mode Options -->
+            <div class="space-y-2">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" v-model="saveMode" value="same-dir" class="w-3.5 h-3.5 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                <span class="text-xs font-medium text-slate-700">保存在原文件目录</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" v-model="saveMode" value="custom-dir" class="w-3.5 h-3.5 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                <span class="text-xs font-medium text-slate-700">保存在自定义目录</span>
+              </label>
+            </div>
+            
+            <!-- Custom Dir Chooser (shown only when custom-dir selected) -->
+            <div v-if="saveMode === 'custom-dir'" class="space-y-1.5 pt-1">
+              <div class="flex items-center gap-1">
+                <input 
+                  type="text" 
+                  readonly 
+                  :value="customOutputDir || '未选择文件夹'" 
+                  class="flex-1 min-w-0 px-2 py-1 bg-white border border-slate-200 rounded text-[11px] font-medium text-slate-600 truncate focus:outline-none"
+                />
+                <button 
+                  @click="selectCustomOutputDir" 
+                  class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-[11px] font-semibold transition-colors shrink-0"
+                >
+                  选择
+                </button>
+              </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="border-t border-slate-200/60 my-2"></div>
+
+            <!-- Conflict Policy -->
+            <div class="space-y-2">
+              <div class="text-[10px] font-semibold text-slate-400">同名文件处理</div>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" v-model="conflictPolicy" value="overwrite" class="w-3 h-3 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                  <span class="text-[11px] font-medium text-slate-600">自动覆盖</span>
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" v-model="conflictPolicy" value="rename" class="w-3 h-3 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                  <span class="text-[11px] font-medium text-slate-600">自动重命名</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <!-- Global Progress (Visible during processing) -->
           <div v-if="isGlobalProcessing || completedTaskCount > 0" class="space-y-3 bg-white/50 border border-slate-200/60 rounded-xl p-3">
             <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-tight">
@@ -181,7 +234,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -212,6 +265,39 @@ const error = ref('');
 const isDragging = ref(false);
 const filterStatus = ref<string[]>([]); // 'processing', 'pending'
 let dragCounter = 0;
+
+const saveMode = ref<'same-dir' | 'custom-dir'>(
+  (localStorage.getItem('saveMode') as 'same-dir' | 'custom-dir') || 'same-dir'
+);
+const customOutputDir = ref<string>(localStorage.getItem('customOutputDir') || '');
+const conflictPolicy = ref<'overwrite' | 'rename'>(
+  (localStorage.getItem('conflictPolicy') as 'overwrite' | 'rename') || 'overwrite'
+);
+
+watch(saveMode, (val) => {
+  localStorage.setItem('saveMode', val);
+});
+watch(customOutputDir, (val) => {
+  localStorage.setItem('customOutputDir', val);
+});
+watch(conflictPolicy, (val) => {
+  localStorage.setItem('conflictPolicy', val);
+});
+
+// Directory selection handler
+async function selectCustomOutputDir() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+    });
+    if (selected && typeof selected === 'string') {
+      customOutputDir.value = selected;
+    }
+  } catch (err) {
+    error.value = '选择文件夹失败';
+  }
+}
 
 const API_URL = 'http://127.0.0.1:8000';
 
@@ -402,12 +488,21 @@ async function processSingleTask(task: Task) {
   task.message = '连接后端...';
 
   try {
-    const lastSlash = Math.max(task.path.lastIndexOf('/'), task.path.lastIndexOf('\\'));
-    const outputDir = task.path.substring(0, lastSlash);
+    let outputDir = '';
+    if (saveMode.value === 'custom-dir' && customOutputDir.value) {
+      outputDir = customOutputDir.value;
+    } else {
+      const lastSlash = Math.max(task.path.lastIndexOf('/'), task.path.lastIndexOf('\\'));
+      outputDir = task.path.substring(0, lastSlash);
+    }
 
     const response = await fetch(`${API_URL}/process`, {
       method: 'POST',
-      body: JSON.stringify({ input_path: task.path, output_dir: outputDir }),
+      body: JSON.stringify({ 
+        input_path: task.path, 
+        output_dir: outputDir,
+        conflict_policy: conflictPolicy.value
+      }),
       headers: { 'Content-Type': 'application/json' }
     });
 
