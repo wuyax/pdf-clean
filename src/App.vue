@@ -546,10 +546,10 @@ async function processSingleTask(task: Task) {
             if (task.status !== 'completed' && task.status !== 'error') {
               task.status = 'error';
               task.message = '流中断';
+              eventSource.close();
+              resolve(false);
             }
           }, 100);
-          eventSource.close();
-          resolve(false);
         };
       });
     } else {
