@@ -499,11 +499,14 @@ async function processSingleTask(task: Task) {
     } else {
       const lastSlash = Math.max(task.path.lastIndexOf('/'), task.path.lastIndexOf('\\'));
       if (lastSlash === 0) {
-        outputDir = task.path.substring(0, 1); // "/" or "\\"
+        outputDir = task.path.substring(0, 1);
       } else if (lastSlash > 0) {
         outputDir = task.path.substring(0, lastSlash);
+        if (outputDir.endsWith(':')) {
+          outputDir += task.path.charAt(lastSlash); // Append the slash to make it C:\ or C:/
+        }
       } else {
-        outputDir = '.'; // Local folder indicator
+        outputDir = '.';
       }
     }
 
