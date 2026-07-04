@@ -21,12 +21,55 @@ def test_health_check():
     assert response.json() == {"status": "ok"}
 
 @patch("src.main.os.path.exists", return_value=True)
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir", return_value=True)
 @patch("src.main.process_pdf")
-def test_process_endpoint(mock_process, mock_exists):
+def test_process_endpoint(mock_process, mock_isdir, mock_isfile, mock_exists):
     response = client.post("/process", json={"input_path": "dummy.pdf", "output_dir": "/tmp"})
     assert response.status_code == 200
     assert "task_id" in response.json()
-    assert response.json()["output_path"] == "/tmp/dummy_clean.pdf"
+    assert response.json()["output_path"] == os.path.abspath("/tmp/dummy_clean.pdf")
+
+def test_cors_validation():
+    # Check that permitted origins work
+    for origin in ["http://localhost:1420", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]:
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    # Check that dis-allowed origins fail CORS
+    response = client.get("/health", headers={"Origin": "http://evil.com"})
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+@patch("src.main.os.path.exists", return_value=True)
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir")
+@patch("src.main.process_pdf")
+def test_process_path_traversal_validation(mock_process, mock_isdir, mock_isfile, mock_exists):
+    # If the output directory is invalid (e.g. contains traversal characters and is not directory)
+    mock_isdir.return_value = False
+    response = client.post("/process", json={"input_path": "dummy.pdf", "output_dir": "/tmp/../etc"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid output directory"
+
+@patch("src.main.os.path.exists", return_value=True)
+@patch("src.main.os.path.isfile", return_value=True)
+@patch("src.main.os.path.isdir", return_value=True)
+@patch("src.main.process_pdf")
+def test_process_path_traversal_escape(mock_process, mock_isdir, mock_isfile, mock_exists):
+    # Simulate a path traversal attempt where the output file does not reside in the output directory
+    def mock_abspath(path):
+        if "clean" in path:
+            return "/etc/passwd"
+        if "dummy.pdf" in path:
+            return "/tmp/safe/dummy.pdf"
+        return "/tmp/safe"
+
+    with patch("src.main.os.path.abspath", side_effect=mock_abspath):
+        response = client.post("/process", json={"input_path": "dummy.pdf", "output_dir": "/tmp/safe"})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Path traversal attempt detected" 
 
 
 def test_stream_progress_cleanup():

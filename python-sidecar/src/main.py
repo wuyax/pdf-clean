@@ -28,7 +28,12 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:1420",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,18 +100,28 @@ def run_process_task(task_id: str, input_path: str, output_path: str):
 
 @app.post("/process", response_model=ProcessResponse)
 def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
-    if not os.path.exists(req.input_path):
+    # Resolve absolute paths
+    input_path = os.path.abspath(req.input_path)
+    output_dir = os.path.abspath(req.output_dir)
+    
+    if not os.path.exists(input_path) or not os.path.isfile(input_path):
         raise HTTPException(status_code=404, detail="Input file not found")
         
-    filename = os.path.basename(req.input_path)
+    if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
+        raise HTTPException(status_code=400, detail="Invalid output directory")
+        
+    filename = os.path.basename(input_path)
     name, ext = os.path.splitext(filename)
     output_filename = f"{name}_clean{ext}"
-    output_path = os.path.join(req.output_dir, output_filename)
+    output_path = os.path.abspath(os.path.join(output_dir, output_filename))
     
+    # Assert path traversal protection: output file must reside inside target output directory
+    if not output_path.startswith(output_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
+        
     task_id = str(uuid.uuid4())
-    
-    # Start background task
-    background_tasks.add_task(run_process_task, task_id, req.input_path, output_path)
+    # Start background task with sanitized paths
+    background_tasks.add_task(run_process_task, task_id, input_path, output_path)
         
     return ProcessResponse(task_id=task_id, output_path=output_path)
 
