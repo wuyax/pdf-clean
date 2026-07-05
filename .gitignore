@@ -35,3 +35,6 @@ env/
 .vscode/
 plans/
 docs/
+.superpowers/
+skills-lock.json
+*.pdf
