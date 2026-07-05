@@ -525,29 +525,67 @@ async function processSingleTask(task: Task) {
       task.task_id = data.task_id;
 
       await new Promise((resolve) => {
-        const eventSource = new EventSource(`${API_URL}/stream/${task.task_id}`);
+        let retryCount = 0;
+        const maxRetries = 5;
 
-        eventSource.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          task.status = data.status;
-          task.message = data.message;
-          task.current_page = data.current_page;
-          task.total_pages = data.total_pages;
+        function connect() {
+          const eventSource = new EventSource(`${API_URL}/stream/${task.task_id}`);
 
-          if (data.status === 'completed' || data.status === 'error') {
+          eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.status === 'not_found' && retryCount < maxRetries) {
+              return;
+            }
+            task.status = data.status;
+            task.message = data.message;
+            task.current_page = data.current_page;
+            task.total_pages = data.total_pages;
+
+            if (data.status === 'completed' || data.status === 'error') {
+              eventSource.close();
+              resolve(data.status === 'completed');
+            }
+          };
+
+          eventSource.onerror = async () => {
             eventSource.close();
-            resolve(true);
-          }
-        };
 
-        eventSource.onerror = (_e) => {
-          if (task.status !== 'completed') {
-            task.status = 'error';
-            task.message = '流中断';
-          }
-          eventSource.close();
-          resolve(false);
-        };
+            try {
+              const statusResponse = await fetch(`${API_URL}/status/${task.task_id}`);
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.status === 'completed') {
+                  task.status = 'completed';
+                  task.message = statusData.message;
+                  resolve(true);
+                  return;
+                } else if (statusData.status === 'error') {
+                  task.status = 'error';
+                  task.message = statusData.message;
+                  resolve(false);
+                  return;
+                } else if (statusData.status === 'processing') {
+                  if (retryCount < maxRetries) {
+                    retryCount++;
+                    task.message = `正在重新连接... (${retryCount}/${maxRetries})`;
+                    setTimeout(connect, 1500);
+                    return;
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Error verifying task status during stream failure:", err);
+            }
+
+            if (task.status !== 'completed') {
+              task.status = 'error';
+              task.message = '流中断';
+            }
+            resolve(false);
+          };
+        }
+
+        connect();
       });
     } else {
       task.status = 'error';
