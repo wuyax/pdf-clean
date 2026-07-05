@@ -38,3 +38,7 @@ docs/
 .superpowers/
 skills-lock.json
 *.pdf
+
+/python-sidecar/models/
+/src-tauri/resources/ocr_models/
+
