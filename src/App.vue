@@ -8,15 +8,7 @@
     @drop.prevent="onDrop"
   >
     <!-- Simplified Titlebar -->
-    <header
-      data-tauri-drag-region
-      class="h-[30px] flex items-center px-4 border-b border-slate-200/60 bg-white z-50 shrink-0"
-    >
-      <div class="flex items-center gap-2 pointer-events-none ml-[72px]" data-tauri-drag-region>
-        <span class="text-[11px] font-semibold text-slate-700">PDF OCR Cleaner</span>
-        <span class="text-[10px] text-slate-400 font-medium tracking-wide">v1.0</span>
-      </div>
-    </header>
+    <Titlebar />
 
     <div class="flex-1 flex overflow-hidden">
       <!-- Sidebar / Control Center -->
@@ -169,18 +161,7 @@
       <!-- Main Content Area -->
       <main class="flex-1 overflow-hidden relative flex flex-col bg-white">
         <!-- Empty State -->
-        <div v-if="tasks.length === 0" class="flex-1 flex flex-col items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-700">
-          <div class="relative mb-6">
-            <div class="absolute inset-0 bg-blue-100 rounded-full blur-3xl opacity-30 animate-pulse"></div>
-            <div class="relative w-20 h-20 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center shadow-sm">
-              <svg class="w-10 h-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-            </div>
-          </div>
-          <p class="text-[15px] font-semibold text-slate-700 tracking-tight">准备好处理您的文档</p>
-          <p class="text-xs text-slate-400 mt-2 font-medium">将 PDF 文件拖放到此处或点击“添加文件”</p>
-        </div>
+        <EmptyState v-if="tasks.length === 0" />
 
         <!-- Task List -->
         <TaskTable
@@ -215,21 +196,7 @@
     </div>
 
     <!-- Refined Status Bar -->
-    <footer class="h-8 border-t border-slate-200/60 bg-white flex items-center px-6 justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400 select-none shrink-0">
-      <div class="flex gap-6">
-        <div v-if="tasks.length > 0" class="flex items-center gap-2">
-          <div class="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
-          <span>{{ tasks.length }} 个文件已载入</span>
-        </div>
-        <div v-if="error" class="flex items-center gap-1.5 text-rose-500">
-          <AlertCircle class="w-3 h-3" />
-          <span>{{ error }}</span>
-        </div>
-      </div>
-      <div class="flex items-center gap-4">
-        <span class="hover:text-slate-600 transition-colors cursor-default tracking-normal lowercase font-medium italic">Powered by Impeccable Design</span>
-      </div>
-    </footer>
+    <Footer :tasks-count="tasks.length" :error="error" />
   </div>
 </template>
 
@@ -242,10 +209,12 @@ import {
   FilePlus,
   Trash2,
   Loader2,
-  Clock,
-  AlertCircle
+  Clock
 } from 'lucide-vue-next';
 import TaskTable from './components/TaskTable.vue';
+import Titlebar from './components/Titlebar.vue';
+import EmptyState from './components/EmptyState.vue';
+import Footer from './components/Footer.vue';
 
 interface Task {
   path: string;
