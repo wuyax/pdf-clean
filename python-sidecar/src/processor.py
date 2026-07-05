@@ -1,8 +1,6 @@
 import os
 
-# 1. 强制设定 PaddleOCR 的环境变量，以优化内存管理和减少多线程冲突
-os.environ["FLAGS_allocator_strategy"] = "auto_growth"
-os.environ["FLAGS_eager_delete_tensor_gb"] = "0.0"
+# 1. 优化内存管理和减少多线程冲突的环境变量
 os.environ["OMP_NUM_THREADS"] = "1"
 
 import fitz  # PyMuPDF, 用于 PDF 读写和渲染
@@ -16,26 +14,21 @@ ocr_instance = None
 
 def get_ocr():
     """
-    懒加载并返回 PaddleOCR 实例。
+    懒加载并返回 RapidOCR 实例。
     """
     global ocr_instance
     if ocr_instance is not None:
         return ocr_instance
-        
     try:
-        from paddleocr import PaddleOCR
-        print("Initializing PaddleOCR 3.5.0 Engine...")
-        
-        # 在 PaddleOCR 3.5.0 中，许多旧参数（如 use_gpu, enable_mkldnn）被移除或改变了行为。
-        # 这里只传入最核心且受支持的参数。
-        # 【极其重要】：必须关闭文档去畸变 (use_doc_unwarping=False) 和版面方向分类 (use_doc_orientation_classify=False)。
-        # 否则，PaddleOCR 会对传入的图像矩阵进行拉伸和扭曲，导致返回的文字坐标框
-        # 与我们未变形的原始 PDF 背景图像产生极其严重的坐标错位！
-        ocr_instance = PaddleOCR(
-            use_textline_orientation=True,
-            use_doc_unwarping=False,
-            use_doc_orientation_classify=False,
-            lang="ch"
+        from rapidocr_onnxruntime import RapidOCR
+        model_dir = os.environ.get("MODEL_DIR") or os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "models")
+        )
+        print(f"Initializing RapidOCR Engine with models from: {model_dir}")
+        ocr_instance = RapidOCR(
+            det_model_path=os.path.join(model_dir, "det.onnx"),
+            rec_model_path=os.path.join(model_dir, "rec.onnx"),
+            cls_model_path=os.path.join(model_dir, "cls.onnx")
         )
         return ocr_instance
     except Exception as e:
@@ -175,7 +168,11 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 img_np = img_np[:, :, ::-1] 
                 
                 # 在低分小图上执行 OCR 识别
-                result = ocr.ocr(img_np)
+                ocr_res = ocr(img_np)
+                if ocr_res is not None:
+                    result, elapse = ocr_res
+                else:
+                    result = None
                 
                 # 使用原始 PDF 精确的物理坐标尺寸 (Points) 创建新页面，防止生成的 PDF 版面被无端放大
                 page_out = doc_out.new_page(width=rect_pts.width, height=rect_pts.height)
@@ -190,24 +187,11 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 scale_x = rect_pts.width / pix_ocr.width
                 scale_y = rect_pts.height / pix_ocr.height
                 
-                print(f"  Raw OCR Result Keys: {type(result[0])} {result[0].keys() if isinstance(result[0], dict) else 'Not a dict'}")
+                if result:
+                    print(f"  Raw OCR Result length: {len(result)}")
                 
-                # 提取 OCR 返回的文字块列表 (兼容不同版本 PaddleOCR 的返回结构)
-                text_blocks = []
-                if hasattr(result[0], '__contains__'): 
-                    if 'dt_polys' in result[0] and 'rec_texts' in result[0]:
-                        polys = result[0]['dt_polys']
-                        texts = result[0]['rec_texts']
-                        try:
-                            scores = result[0]['rec_scores']
-                        except KeyError:
-                            scores = [1.0] * len(texts)
-                        for p, t, s in zip(polys, texts, scores):
-                            text_blocks.append([p, (t, s)])
-                    elif 'res' in result[0]: 
-                        text_blocks = result[0]['res']
-                elif isinstance(result[0], list):
-                    text_blocks = result[0]
+                # 提取 OCR 返回的文字块列表
+                text_blocks = result if result else []
 
                 if text_blocks:
                     print(f"  Detected {len(text_blocks)} text lines.")
@@ -217,14 +201,8 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                                 print(f"    Sample block structure: {line}")
                                 
                             box = line[0]
-                            text_data = line[1]
-                            
-                            if isinstance(text_data, (tuple, list)):
-                                text = str(text_data[0])
-                                conf = float(text_data[1])
-                            else:
-                                text = str(text_data)
-                                conf = 1.0 
+                            text = str(line[1])
+                            conf = float(line[2])
                                 
                             # 剔除置信度低于 0.3 的垃圾识别结果
                             if conf < 0.3: continue

@@ -13,7 +13,8 @@ def test_process_pdf(mock_get_ocr, mock_fitz, tmp_path):
     # Arrange
     mock_ocr = MagicMock()
     mock_get_ocr.return_value = mock_ocr
-    mock_ocr.ocr.return_value = [[[[[0, 0], [10, 0], [10, 10], [0, 10]], ('test', 0.99)]]]
+    results = [[[[0, 0], [10, 0], [10, 10], [0, 10]], 'test', 0.99]]
+    mock_ocr.return_value = (results, 0.1)
     
     mock_doc = MagicMock()
     mock_fitz.open.return_value = mock_doc
@@ -40,5 +41,5 @@ def test_process_pdf(mock_get_ocr, mock_fitz, tmp_path):
     # Assert
     assert result == str(output_pdf)
     mock_get_ocr.assert_called_once()
-    mock_ocr.ocr.assert_called_once()
+    mock_ocr.assert_called_once()
     mock_doc.save.assert_called_once()

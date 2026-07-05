@@ -90,43 +90,40 @@ def classify_pdf(file_path: str) -> str:
             img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3).copy()
             img_np = img_np[:, :, ::-1] 
             
-            res = ocr.ocr(img_np)
-            if res and res[0]:
-                text_blocks = []
-                if hasattr(res[0], '__contains__') and 'rec_texts' in res[0]:
-                    text_blocks = res[0]['rec_texts']
-                elif isinstance(res[0], list):
-                    text_blocks = [line[1][0] for line in res[0]]
-                
-                ocr_text = "".join(text_blocks)
-                ocr_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', ocr_text)
-                pdf_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
-                
-                if len(ocr_clean) > 5:
-                    len_ratio = len(pdf_clean) / len(ocr_clean)
-                    sim_ratio = SequenceMatcher(None, ocr_clean, pdf_clean).ratio()
+            ocr_res = ocr(img_np)
+            if ocr_res is not None:
+                results, elapse = ocr_res
+                if results:
+                    text_blocks = [str(line[1]) for line in results if line[1]]
+                    ocr_text = "".join(text_blocks)
+                    ocr_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', ocr_text)
+                    pdf_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
                     
-                    # LOGIC:
-                    # If it's a decoy:
-                    # - Many images (Slicing) AND (Low similarity OR extreme length mismatch)
-                    if is_suspiciously_sliced and (sim_ratio < 0.3 or len_ratio < 0.4):
-                        doc.close()
-                        return "TYPE_2"
-                    
-                    # If similarity is very low even without slicing (normal scanned decoy)
-                    if sim_ratio < 0.2 or len_ratio < 0.2:
-                        doc.close()
-                        return "TYPE_2"
+                    if len(ocr_clean) > 5:
+                        len_ratio = len(pdf_clean) / len(ocr_clean)
+                        sim_ratio = SequenceMatcher(None, ocr_clean, pdf_clean).ratio()
                         
-                    # If similarity is high, it's valid (Normal text or good OCR)
-                    if sim_ratio > 0.7:
+                        # LOGIC:
+                        # If it's a decoy:
+                        # - Many images (Slicing) AND (Low similarity OR extreme length mismatch)
+                        if is_suspiciously_sliced and (sim_ratio < 0.3 or len_ratio < 0.4):
+                            doc.close()
+                            return "TYPE_2"
+                        
+                        # If similarity is very low even without slicing (normal scanned decoy)
+                        if sim_ratio < 0.2 or len_ratio < 0.2:
+                            doc.close()
+                            return "TYPE_2"
+                            
+                        # If similarity is high, it's valid (Normal text or good OCR)
+                        if sim_ratio > 0.7:
+                            doc.close()
+                            return "TYPE_3"
+                    elif len(pdf_clean) > 20:
+                        # OCR detected almost nothing (<= 5 chars) but the PDF text layer has significant text (> 20 chars).
+                        # This indicates hidden/decoy text on an image.
                         doc.close()
-                        return "TYPE_3"
-                elif len(pdf_clean) > 20:
-                    # OCR detected almost nothing (<= 5 chars) but the PDF text layer has significant text (> 20 chars).
-                    # This indicates hidden/decoy text on an image.
-                    doc.close()
-                    return "TYPE_2"
+                        return "TYPE_2"
 
     # Default to TYPE_1 for all other natural/mixed documents
     doc.close()

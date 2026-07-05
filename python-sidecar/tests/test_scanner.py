@@ -42,7 +42,8 @@ def test_classify_decoy_format(mock_exists):
 
     # Mock OCR failing/returning mismatched text
     mock_ocr = MagicMock()
-    mock_ocr.ocr.return_value = [[[[[0, 0], [10, 0], [10, 10], [0, 10]], ('completely different text', 0.99)]]]
+    results = [[[[0, 0], [10, 0], [10, 10], [0, 10]], 'completely different text', 0.99]]
+    mock_ocr.return_value = (results, 0.1)
     
     # Mock pixmap rendering
     mock_pix = MagicMock()
@@ -71,7 +72,8 @@ def test_classify_decoy_with_empty_ocr(mock_exists):
 
     # Mock OCR returning nothing
     mock_ocr = MagicMock()
-    mock_ocr.ocr.return_value = [[[[[0, 0], [10, 0], [10, 10], [0, 10]], ('', 0.0)]]]
+    results = [[[[0, 0], [10, 0], [10, 10], [0, 10]], '', 0.0]]
+    mock_ocr.return_value = (results, 0.1)
     
     mock_pix = MagicMock()
     mock_pix.width = 100

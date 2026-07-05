@@ -163,7 +163,7 @@
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center gap-2">
           <span class="text-[10px] font-semibold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">Active</span>
-          <p class="text-[10px] text-slate-400 font-medium">PaddleOCR 3.5.0</p>
+          <p class="text-[10px] text-slate-400 font-medium">RapidOCR (ONNX)</p>
         </div>
       </div>
     </div>
