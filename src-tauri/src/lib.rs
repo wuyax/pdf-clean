@@ -21,6 +21,27 @@
                 main_window.set_title("").ok();
             }
 
+            #[cfg(not(debug_assertions))]
+            {
+                use tauri_plugin_shell::ShellExt;
+                use tauri::path::BaseDirectory;
+
+                let ocr_models_dir = app.path()
+                    .resolve("resources/ocr_models", BaseDirectory::Resource)?;
+                let ocr_models_str = ocr_models_dir.to_string_lossy().to_string();
+
+                let (mut rx, _child) = app.shell()
+                    .sidecar("python-sidecar")?
+                    .env("MODEL_DIR", &ocr_models_str)
+                    .spawn()?;
+
+                tauri::async_runtime::spawn(async move {
+                    while let Some(_event) = rx.recv().await {
+                        // Drain output to prevent buffer blocking
+                    }
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())

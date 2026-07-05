@@ -34,7 +34,10 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-
+      "binaries/python-sidecar"
+    ],
+    "resources": [
+      "resources/ocr_models/*"
     ]
   }
 }
