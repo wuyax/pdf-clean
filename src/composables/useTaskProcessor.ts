@@ -98,7 +98,7 @@ export function useTaskProcessor(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      const results = await scanFilesApi(paths);
+      const results = await scanFilesApi(paths, controller.signal);
       clearTimeout(timeoutId);
 
       tasks.value.forEach(t => {
@@ -238,7 +238,7 @@ export function useTaskProcessor(
   }
 
   function removeTask(path: string) {
-    tasks.value = tasks.value.filter(t => t.path !== path);
+    tasks.value = tasks.value.filter(t => t.path !== path || t.status === 'processing');
   }
 
   function clearAll() {

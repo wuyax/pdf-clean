@@ -2,11 +2,12 @@ import { ConflictPolicy } from '../types/task';
 
 const API_URL = 'http://127.0.0.1:8000';
 
-export async function scanFilesApi(paths: string[]): Promise<Record<string, string>> {
+export async function scanFilesApi(paths: string[], signal?: AbortSignal): Promise<Record<string, string>> {
   const response = await fetch(`${API_URL}/scan`, {
     method: 'POST',
     body: JSON.stringify({ file_paths: paths }),
     headers: { 'Content-Type': 'application/json' },
+    signal
   });
   if (!response.ok) throw new Error(`Scan failed: ${response.status}`);
   return response.json();
