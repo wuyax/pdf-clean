@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: 'npm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -82,7 +83,7 @@ jobs:
         shell: bash
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: npm ci --verbose
 
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
