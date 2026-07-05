@@ -16,12 +16,6 @@ Install from [rustup.rs](https://rustup.rs/). Required for building the Tauri ap
 ### 2. Python 3.10+
 Required for the OCR sidecar.
 
-### 3. Poppler
-`pdf2image` depends on Poppler.
-- **macOS**: `brew install poppler`
-- **Windows**: Download from [poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases/) and add `bin` to PATH.
-- **Linux**: `sudo apt install poppler-utils`
-
 ## Development
 
 ### Backend (Sidecar)

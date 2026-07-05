@@ -2,8 +2,8 @@ import pytest
 import sys
 from unittest.mock import patch, MagicMock
 
-# Mock paddleocr to prevent ModuleNotFoundError
-sys.modules['paddleocr'] = MagicMock()
+# Mock rapidocr_onnxruntime to prevent ModuleNotFoundError
+sys.modules['rapidocr_onnxruntime'] = MagicMock()
 
 from src.processor import process_pdf
 

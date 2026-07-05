@@ -5,8 +5,8 @@ from unittest.mock import patch, MagicMock
 import sys
 import os
 
-# Mock paddleocr to prevent ModuleNotFoundError
-sys.modules['paddleocr'] = MagicMock()
+# Mock rapidocr_onnxruntime to prevent ModuleNotFoundError
+sys.modules['rapidocr_onnxruntime'] = MagicMock()
 
 # Ensure src is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
