@@ -12,14 +12,15 @@ def download_models():
     os.makedirs(target_dir, exist_ok=True)
     for name, url in MODELS.items():
         dest = os.path.join(target_dir, name)
-        if not os.path.exists(dest):
+        # Check if file exists and is not extremely small (e.g. less than 10KB, which indicates a corrupted/failed download)
+        if not os.path.exists(dest) or os.path.getsize(dest) < 10240:
             print(f"Downloading {name} from {url}...")
             tmp_dest = dest + ".tmp"
             try:
                 urllib.request.urlretrieve(url, tmp_dest)
                 os.replace(tmp_dest, dest)
                 print(f"Saved to {dest}")
-            except Exception as e:
+            except BaseException as e:
                 if os.path.exists(tmp_dest):
                     try:
                         os.remove(tmp_dest)
