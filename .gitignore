@@ -41,4 +41,5 @@ skills-lock.json
 
 /python-sidecar/models/
 /src-tauri/resources/ocr_models/
+/src-tauri/binaries/
 
