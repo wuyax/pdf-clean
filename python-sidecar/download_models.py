@@ -14,8 +14,18 @@ def download_models():
         dest = os.path.join(target_dir, name)
         if not os.path.exists(dest):
             print(f"Downloading {name} from {url}...")
-            urllib.request.urlretrieve(url, dest)
-            print(f"Saved to {dest}")
+            tmp_dest = dest + ".tmp"
+            try:
+                urllib.request.urlretrieve(url, tmp_dest)
+                os.replace(tmp_dest, dest)
+                print(f"Saved to {dest}")
+            except Exception as e:
+                if os.path.exists(tmp_dest):
+                    try:
+                        os.remove(tmp_dest)
+                    except Exception:
+                        pass
+                raise e
         else:
             print(f"{name} already exists.")
 
