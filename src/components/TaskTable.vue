@@ -115,6 +115,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Task } from '../types/task';
 import { 
   Files, 
   FileText, 
@@ -129,7 +130,7 @@ import {
 } from 'lucide-vue-next';
 
 const props = defineProps<{
-  tasks: any[];
+  tasks: Task[];
 }>();
 
 const emit = defineEmits(['toggle-all', 'remove-task']);
