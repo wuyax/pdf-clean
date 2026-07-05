@@ -143,6 +143,12 @@ def process_endpoint(req: ProcessRequest, background_tasks: BackgroundTasks):
         
     return ProcessResponse(task_id=task_id, output_path=output_path)
 
+@app.get("/status/{task_id}")
+def get_task_status(task_id: str):
+    if task_id not in tasks_status:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return tasks_status[task_id]
+
 @app.get("/stream/{task_id}")
 async def stream_progress(task_id: str):
     async def event_generator():
@@ -175,7 +181,9 @@ async def stream_progress(task_id: str):
                     
                 await asyncio.sleep(0.5)
         finally:
-            tasks_status.pop(task_id, None)
+            # We no longer pop the task_id here, allowing the client to poll /status/{task_id}
+            # or reconnect to /stream/{task_id} if there was a transient network error.
+            pass
             
     return EventSourceResponse(event_generator())
 

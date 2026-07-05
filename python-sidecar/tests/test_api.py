@@ -91,6 +91,26 @@ def test_process_path_traversal_sibling_bypass(mock_process, mock_isdir, mock_is
         assert response.json()["detail"] == "Path traversal attempt detected"
 
 
+def test_status_endpoint():
+    from src.main import tasks_status
+    
+    task_id = 'status-test-123'
+    tasks_status[task_id] = {
+        'status': 'completed',
+        'message': 'Done',
+        'output_path': 'dummy.pdf'
+    }
+    
+    response = client.get(f'/status/{task_id}')
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    
+    response = client.get('/status/non-existent-task')
+    assert response.status_code == 404
+    
+    tasks_status.pop(task_id, None)
+
+
 def test_stream_progress_cleanup():
     from src.main import tasks_status
     
@@ -109,7 +129,8 @@ def test_stream_progress_cleanup():
         first_line = next(iterator)
         assert len(first_line) > 0
         
-    assert task_id not in tasks_status
+    assert task_id in tasks_status
+    tasks_status.pop(task_id, None)
 
 
 def test_tasks_status_capping():
