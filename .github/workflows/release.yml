@@ -1,0 +1,101 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+            python-arch: 'arm64'
+          - platform: 'macos-13'
+            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+            python-arch: 'x64'
+          - platform: 'windows-latest'
+            args: ''
+            target: 'x86_64-pc-windows-msvc'
+            python-arch: 'x64'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          architecture: ${{ matrix.python-arch }}
+
+      - name: Install Python Dependencies
+        run: |
+          cd python-sidecar
+          python -m venv venv
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ./venv/Scripts/pip install -r requirements.txt
+            ./venv/Scripts/pip install pyinstaller
+          else
+            ./venv/bin/pip install -r requirements.txt
+            ./venv/bin/pip install pyinstaller
+          fi
+        shell: bash
+
+      - name: Download ONNX Models
+        run: |
+          cd python-sidecar
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ./venv/Scripts/python download_models.py
+          else
+            ./venv/bin/python download_models.py
+          fi
+          mkdir -p ../src-tauri/resources/ocr_models
+          cp -r models/* ../src-tauri/resources/ocr_models/
+        shell: bash
+
+      - name: Build Python Sidecar Binary
+        run: |
+          cd python-sidecar
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ./venv/Scripts/pyinstaller --clean -y --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz src/main.py
+            mkdir -p ../src-tauri/binaries
+            cp dist/python-sidecar.exe ../src-tauri/binaries/python-sidecar-x86_64-pc-windows-msvc.exe
+          else
+            ./venv/bin/pyinstaller --clean -y --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz src/main.py
+            mkdir -p ../src-tauri/binaries
+            cp dist/python-sidecar ../src-tauri/binaries/python-sidecar-${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PDF OCR Decoy Cleaner ${{ github.ref_name }}'
+          releaseBody: 'Automated release of version ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
