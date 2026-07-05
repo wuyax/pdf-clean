@@ -1,0 +1,276 @@
+import { ref, computed, Ref } from 'vue';
+import { open } from '@tauri-apps/plugin-dialog';
+import { Task, SaveMode, ConflictPolicy } from '../types/task';
+import { scanFilesApi, processTaskApi, getTaskStatusApi, getEventSourceUrl } from '../services/api';
+
+export function useTaskProcessor(
+  saveMode: Ref<SaveMode>,
+  customOutputDir: Ref<string>,
+  conflictPolicy: Ref<ConflictPolicy>
+) {
+  const tasks = ref<Task[]>([]);
+  const isGlobalProcessing = ref(false);
+  const error = ref('');
+  const filterStatus = ref<string[]>([]);
+
+  const filteredTasks = computed(() => {
+    if (filterStatus.value.length === 0) return tasks.value;
+
+    return tasks.value.filter(t => {
+      if (filterStatus.value.includes('processing') && t.status === 'processing') return true;
+      if (filterStatus.value.includes('pending') && (t.status === 'idle' || t.status === 'scanning')) return true;
+      return false;
+    });
+  });
+
+  const totalSelectedTaskCount = computed(() => {
+    return tasks.value.filter(t => t.selected).length;
+  });
+
+  const completedTaskCount = computed(() => {
+    return tasks.value.filter(t => t.selected && t.status === 'completed').length;
+  });
+
+  const globalProgress = computed(() => {
+    if (totalSelectedTaskCount.value === 0) return 0;
+    return Math.round((completedTaskCount.value / totalSelectedTaskCount.value) * 100);
+  });
+
+  const hasSelectedTasks = computed(() => {
+    return tasks.value.some(t => t.selected && t.status !== 'completed');
+  });
+
+  function toggleFilter(status: string) {
+    const index = filterStatus.value.indexOf(status);
+    if (index === -1) {
+      filterStatus.value.push(status);
+    } else {
+      filterStatus.value.splice(index, 1);
+    }
+  }
+
+  async function addTasksFromPaths(paths: string[]) {
+    const newTasks = paths.map(path => ({
+      path,
+      name: path.split(/[/\\]/).pop() || path,
+      selected: true,
+      category: 'UNKNOWN',
+      status: 'idle' as const,
+      message: '等待扫描',
+      current_page: 0,
+      total_pages: 0
+    }));
+
+    const existingPaths = new Set(tasks.value.map(t => t.path));
+    const filteredNewTasks = newTasks.filter(t => !existingPaths.has(t.path));
+
+    tasks.value = [...tasks.value, ...filteredNewTasks];
+    if (filteredNewTasks.length > 0) {
+      await scanFiles(filteredNewTasks);
+    }
+  }
+
+  async function selectFiles() {
+    try {
+      const selected = await open({
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        multiple: true,
+      });
+
+      if (selected && Array.isArray(selected)) {
+        await addTasksFromPaths(selected);
+      }
+    } catch (err) {
+      error.value = '选择文件失败';
+    }
+  }
+
+  async function scanFiles(targetTasks: Task[]) {
+    const paths = targetTasks.map(t => t.path);
+
+    tasks.value.forEach(t => {
+      if (paths.includes(t.path)) {
+        t.status = 'scanning';
+      }
+    });
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+      const results = await scanFilesApi(paths);
+      clearTimeout(timeoutId);
+
+      tasks.value.forEach(t => {
+        if (paths.includes(t.path)) {
+          t.category = results[t.path] || 'UNKNOWN';
+          t.status = 'idle';
+          t.message = '准备就绪';
+          t.selected = (t.category === 'TYPE_2' || t.category === 'TYPE_4');
+        }
+      });
+    } catch (err: any) {
+      tasks.value.forEach(t => {
+        if (paths.includes(t.path)) {
+          t.status = 'error';
+          if (err.name === 'AbortError') {
+            t.message = '分析超时';
+          } else {
+            t.message = '分析失败: ' + err.message;
+          }
+        }
+      });
+    }
+  }
+
+  async function startBatchProcessing() {
+    if (saveMode.value === 'custom-dir' && !customOutputDir.value) {
+      error.value = '请选择自定义保存目录';
+      return;
+    }
+
+    const pendingTasks = tasks.value.filter(t => t.selected && t.status !== 'completed');
+    if (pendingTasks.length === 0) return;
+
+    isGlobalProcessing.value = true;
+    error.value = '';
+
+    for (const task of pendingTasks) {
+      await processSingleTask(task);
+    }
+
+    isGlobalProcessing.value = false;
+  }
+
+  async function processSingleTask(task: Task) {
+    task.status = 'processing';
+    task.message = '连接后端...';
+
+    try {
+      let outputDir = '';
+      if (saveMode.value === 'custom-dir' && customOutputDir.value) {
+        outputDir = customOutputDir.value;
+      } else {
+        const lastSlash = Math.max(task.path.lastIndexOf('/'), task.path.lastIndexOf('\\'));
+        if (lastSlash === 0) {
+          outputDir = task.path.substring(0, 1);
+        } else if (lastSlash > 0) {
+          outputDir = task.path.substring(0, lastSlash);
+          if (outputDir.endsWith(':')) {
+            outputDir += task.path.charAt(lastSlash);
+          }
+        } else {
+          outputDir = '.';
+        }
+      }
+
+      const data = await processTaskApi({
+        input_path: task.path,
+        output_dir: outputDir,
+        conflict_policy: conflictPolicy.value
+      });
+      task.task_id = data.task_id;
+
+      await new Promise<boolean>((resolve) => {
+        let retryCount = 0;
+        const maxRetries = 5;
+
+        function connect() {
+          const eventSource = new EventSource(getEventSourceUrl(task.task_id!));
+
+          eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.status === 'not_found' && retryCount < maxRetries) {
+              return;
+            }
+            task.status = data.status;
+            task.message = data.message;
+            task.current_page = data.current_page;
+            task.total_pages = data.total_pages;
+
+            if (data.status === 'completed' || data.status === 'error') {
+              eventSource.close();
+              resolve(data.status === 'completed');
+            }
+          };
+
+          eventSource.onerror = async () => {
+            eventSource.close();
+
+            try {
+              const statusData = await getTaskStatusApi(task.task_id!);
+              if (statusData.status === 'completed') {
+                task.status = 'completed';
+                task.message = statusData.message;
+                resolve(true);
+                return;
+              } else if (statusData.status === 'error') {
+                task.status = 'error';
+                task.message = statusData.message;
+                resolve(false);
+                return;
+              } else if (statusData.status === 'processing') {
+                if (retryCount < maxRetries) {
+                  retryCount++;
+                  task.message = `正在重新连接... (${retryCount}/${maxRetries})`;
+                  setTimeout(connect, 1500);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.error("Error verifying task status during stream failure:", err);
+            }
+
+            if (task.status !== 'completed') {
+              task.status = 'error';
+              task.message = '流中断';
+            }
+            resolve(false);
+          };
+        }
+
+        connect();
+      });
+    } catch (err: any) {
+      task.status = 'error';
+      task.message = err.message;
+    }
+  }
+
+  function removeTask(path: string) {
+    tasks.value = tasks.value.filter(t => t.path !== path);
+  }
+
+  function clearAll() {
+    if (isGlobalProcessing.value) return;
+    tasks.value = [];
+  }
+
+  function toggleAll() {
+    const target = !tasks.value.every(t => t.selected);
+    tasks.value.forEach(t => {
+      if (t.status !== 'processing' && t.status !== 'completed') {
+        t.selected = target;
+      }
+    });
+  }
+
+  return {
+    tasks,
+    isGlobalProcessing,
+    error,
+    filterStatus,
+    filteredTasks,
+    totalSelectedTaskCount,
+    completedTaskCount,
+    globalProgress,
+    hasSelectedTasks,
+    addTasksFromPaths,
+    selectFiles,
+    startBatchProcessing,
+    removeTask,
+    clearAll,
+    toggleAll,
+    toggleFilter
+  };
+}
