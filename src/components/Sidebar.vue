@@ -171,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { Zap, Loader2, FilePlus, Trash2, Clock } from 'lucide-vue-next';
+import { Zap, Loader2, FilePlus, Trash2, Clock } from '@lucide/vue';
 import { SaveMode, ConflictPolicy } from '../types/task';
 
 defineProps<{

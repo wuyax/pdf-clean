@@ -127,7 +127,7 @@ import {
   AlertCircle, 
   RefreshCw, 
   Trash2 
-} from 'lucide-vue-next';
+} from '@lucide/vue';
 
 const props = defineProps<{
   tasks: Task[];
