@@ -36,8 +36,22 @@
                     .spawn()?;
 
                 tauri::async_runtime::spawn(async move {
-                    while let Some(_event) = rx.recv().await {
-                        // Drain output to prevent buffer blocking
+                    use tauri_plugin_shell::process::CommandEvent;
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let s = String::from_utf8_lossy(&line);
+                                println!("[Sidecar stdout] {}", s.trim_end());
+                            }
+                            CommandEvent::Stderr(line) => {
+                                let s = String::from_utf8_lossy(&line);
+                                eprintln!("[Sidecar stderr] {}", s.trim_end());
+                            }
+                            CommandEvent::Terminated(payload) => {
+                                println!("[Sidecar terminated] Exited with code: {:?}", payload.code);
+                            }
+                            _ => {}
+                        }
                     }
                 });
             }
