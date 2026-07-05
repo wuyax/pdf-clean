@@ -20,10 +20,32 @@ def get_ocr():
     if ocr_instance is not None:
         return ocr_instance
     try:
+        import sys
         from rapidocr_onnxruntime import RapidOCR
         model_dir = os.environ.get("MODEL_DIR") or os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "models")
         )
+        
+        # Verify model files exist
+        models_exist = all(
+            os.path.exists(os.path.join(model_dir, f))
+            for f in ["det.onnx", "rec.onnx", "cls.onnx"]
+        )
+        if not models_exist:
+            if getattr(sys, 'frozen', False):
+                print(f"CRITICAL ERROR: OCR ONNX models are missing in packaged app resources! Path searched: {model_dir}", file=sys.stderr)
+                return None
+            else:
+                print("ONNX models not found in local models directory. Attempting automatic download for development...")
+                try:
+                    # Add parent directory of source code to path to allow importing download_models
+                    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+                    from download_models import download_models
+                    download_models()
+                except Exception as dl_err:
+                    print(f"Automatic model download failed: {dl_err}", file=sys.stderr)
+                    return None
+
         print(f"Initializing RapidOCR Engine with models from: {model_dir}")
         ocr_instance = RapidOCR(
             det_model_path=os.path.join(model_dir, "det.onnx"),
@@ -32,7 +54,7 @@ def get_ocr():
         )
         return ocr_instance
     except Exception as e:
-        print(f"OCR initialization failed: {e}")
+        print(f"OCR initialization failed: {e}", file=sys.stderr)
         return None
 
 def insert_character_level_text(page, rect, text, fontname="china-ss", render_mode=3, color=(0, 0, 0), fill_opacity=1.0):
