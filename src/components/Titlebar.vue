@@ -5,7 +5,11 @@
   >
     <div class="flex items-center gap-2 pointer-events-none ml-[72px]" data-tauri-drag-region>
       <span class="text-[11px] font-semibold text-slate-700">PDF OCR Cleaner</span>
-      <span class="text-[10px] text-slate-400 font-medium tracking-wide">v1.0</span>
+      <span class="text-[10px] text-slate-400 font-medium tracking-wide">v{{ version }}</span>
     </div>
   </header>
 </template>
+
+<script setup lang="ts">
+const version = import.meta.env.VITE_APP_VERSION || '0.1.0';
+</script>

@@ -1,8 +1,11 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import pkg from "./package.json";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+
+process.env.VITE_APP_VERSION = pkg.version;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
