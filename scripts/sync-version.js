@@ -15,7 +15,7 @@ try {
 
   let cargoContent = fs.readFileSync(cargoPath, 'utf8');
   
-  const versionRegex = /(^\[package\](?:(?!^\[)[\s\S])*?\r?\nversion\s*=\s*")[^"]*(")/m;
+  const versionRegex = /(^\[package\](?:(?!^\[)[\s\S])*?\r?\n\s*version\s*=\s*")[^"]*(")/m;
   if (!versionRegex.test(cargoContent)) {
     throw new Error('Could not find the [package] version field in Cargo.toml');
   }

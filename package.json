@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "node scripts/sync-version.js",
     "prebuild": "node scripts/sync-version.js",
+    "version": "node scripts/sync-version.js && git add src-tauri/Cargo.toml",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
