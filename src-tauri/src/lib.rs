@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use std::io::{BufRead, BufReader};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, TitleBarStyle};
+use tokio::sync::Semaphore;
+
+struct AppState {
+    semaphore: Arc<Semaphore>,
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ProgressPayload {
@@ -110,6 +117,9 @@ async fn process_task(
     task_id: String,
     app: AppHandle,
 ) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let permit = state.semaphore.clone().acquire_owned().await.map_err(|e| e.to_string())?;
+
     let args = vec![
         "process".to_string(),
         "--input".to_string(),
@@ -126,6 +136,7 @@ async fn process_task(
     {
         let _ = app;
         std::thread::spawn(move || {
+            let _permit_holder = permit;
             let python_bin = if cfg!(target_os = "windows") {
                 "../python-sidecar/venv/Scripts/python.exe"
             } else {
@@ -216,6 +227,7 @@ async fn process_task(
     #[cfg(not(debug_assertions))]
     {
         tauri::async_runtime::spawn(async move {
+            let _permit_holder = permit;
             use tauri_plugin_shell::ShellExt;
             use tauri_plugin_shell::process::CommandEvent;
 
@@ -359,7 +371,12 @@ async fn process_task(
 }
 
 pub fn run() {
+    let state = AppState {
+        semaphore: Arc::new(Semaphore::new(2)), // Limit to max 2 concurrent OCR tasks
+    };
+
     tauri::Builder::default()
+        .manage(state)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
@@ -382,3 +399,29 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_concurrency_semaphore() {
+        let semaphore = Arc::new(Semaphore::new(2));
+        let p1 = semaphore.clone().acquire_owned().await.unwrap();
+        let _p2 = semaphore.clone().acquire_owned().await.unwrap();
+        
+        let p3_try = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            semaphore.clone().acquire_owned()
+        ).await;
+        assert!(p3_try.is_err());
+        
+        drop(p1);
+        let p3 = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            semaphore.clone().acquire_owned()
+        ).await;
+        assert!(p3.is_ok());
+    }
+}
+
