@@ -31,7 +31,11 @@ if __name__ == "__main__":
         with contextlib.redirect_stdout(sys.stderr):
             for path in file_paths:
                 if os.path.exists(path):
-                    results[path] = classify_pdf(path)
+                    try:
+                        results[path] = classify_pdf(path)
+                    except Exception as e:
+                        print(f"Error scanning {path}: {e}")
+                        results[path] = "TYPE_UNKNOWN"
                 else:
                     results[path] = "NOT_FOUND"
         orig_stdout.write(json.dumps({"type": "scan_result", "results": results}) + "\n")
