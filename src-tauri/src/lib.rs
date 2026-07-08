@@ -193,7 +193,7 @@ async fn process_task(
                .args(args)
                .env("MODEL_DIR", &ocr_models_str)
                .stdout(std::process::Stdio::piped())
-               .stderr(std::process::Stdio::inherit());
+               .stderr(std::process::Stdio::piped());
 
             #[cfg(target_os = "windows")]
             {
@@ -219,26 +219,57 @@ async fn process_task(
             };
 
             let stdout = child.stdout.take().expect("Failed to open stdout");
-            let mut reader = tokio::io::BufReader::new(stdout);
+            let stderr = child.stderr.take().expect("Failed to open stderr");
+            let mut reader_out = tokio::io::BufReader::new(stdout);
+            let mut reader_err = tokio::io::BufReader::new(stderr);
             let mut status_emitted = false;
             let mut line_str = String::new();
+
+            // Spawn stderr reading task
+            let stderr_task = {
+                let mut buffer = Vec::<String>::new();
+                async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut err_line = String::new();
+                    while reader_err.read_line(&mut err_line).await.is_ok() {
+                        if err_line.is_empty() { break; }
+                        let trimmed = err_line.trim_end().to_string();
+                        eprintln!("[Sidecar Stderr] {}", trimmed);
+                        if buffer.len() >= 3 {
+                            buffer.remove(0);
+                        }
+                        buffer.push(trimmed);
+                        err_line.clear();
+                    }
+                    buffer
+                }
+            };
+            let mut stderr_handle = Some(tauri::async_runtime::spawn(stderr_task));
 
             loop {
                 use tokio::io::AsyncBufReadExt;
                 let read_res = tokio::time::timeout(
                     std::time::Duration::from_secs(60),
-                    reader.read_line(&mut line_str)
+                    reader_out.read_line(&mut line_str)
                 ).await;
 
                 let bytes_read = match read_res {
                     Ok(Ok(b)) => b,
                     Ok(Err(_)) | Err(_) => {
                         if !status_emitted {
+                            let stderr_buffer = match stderr_handle.take() {
+                                Some(h) => h.await.unwrap_or_default(),
+                                None => Vec::new(),
+                            };
+                            let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
+                            if !stderr_buffer.is_empty() {
+                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                            }
                             let payload = ProgressPayload {
                                 r#type: "progress".to_string(),
                                 task_id: task_id.clone(),
                                 status: "error".to_string(),
-                                message: "OCR 进程超时或未响应(60秒)".to_string(),
+                                message: msg,
                                 current_page: 0,
                                 total_pages: 0,
                                 output_path: None,
@@ -250,7 +281,7 @@ async fn process_task(
                     }
                 };
 
-                if bytes_read == 0 { break; } // EOF
+                if bytes_read == 0 { break; }
 
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
                     let type_str = val["type"].as_str().unwrap_or("");
@@ -280,12 +311,20 @@ async fn process_task(
                 line_str.clear();
             }
 
+            let stderr_buffer = match stderr_handle.take() {
+                Some(h) => h.await.unwrap_or_default(),
+                None => Vec::new(),
+            };
             if !status_emitted {
+                let mut msg = "进程意外终止".to_string();
+                if !stderr_buffer.is_empty() {
+                    msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                }
                 let payload = ProgressPayload {
                     r#type: "progress".to_string(),
                     task_id: task_id.clone(),
                     status: "error".to_string(),
-                    message: "进程意外终止".to_string(),
+                    message: msg,
                     current_page: 0,
                     total_pages: 0,
                     output_path: None,
@@ -368,17 +407,22 @@ async fn process_task(
 
             let mut status_emitted = false;
             let mut rx = rx;
+            let mut stderr_buffer = Vec::<String>::new();
 
             loop {
                 let event_opt = match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await {
                     Ok(opt) => opt,
                     Err(_) => {
                         if !status_emitted {
+                            let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
+                            if !stderr_buffer.is_empty() {
+                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                            }
                             let payload = ProgressPayload {
                                 r#type: "progress".to_string(),
                                 task_id: task_id.clone(),
                                 status: "error".to_string(),
-                                message: "OCR 进程超时或未响应(60秒)".to_string(),
+                                message: msg,
                                 current_page: 0,
                                 total_pages: 0,
                                 output_path: None,
@@ -392,7 +436,7 @@ async fn process_task(
 
                 let event = match event_opt {
                     Some(ev) => ev,
-                    None => break, // EOF
+                    None => break,
                 };
 
                 match event {
@@ -425,14 +469,22 @@ async fn process_task(
                         }
                     }
                     CommandEvent::Stderr(line) => {
-                        eprintln!("[Sidecar Stderr] {}", String::from_utf8_lossy(&line).trim_end());
+                        let line_str = String::from_utf8_lossy(&line).trim_end().to_string();
+                        eprintln!("[Sidecar Stderr] {}", line_str);
+                        if stderr_buffer.len() >= 3 {
+                            stderr_buffer.remove(0);
+                        }
+                        stderr_buffer.push(line_str);
                     }
                     CommandEvent::Terminated(term_payload) => {
                         if !status_emitted {
-                            let msg = match term_payload.code {
+                            let mut msg = match term_payload.code {
                                 Some(code) => format!("进程意外终止，退出码: {}", code),
                                 None => "进程意外终止".to_string(),
                             };
+                            if !stderr_buffer.is_empty() {
+                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                            }
                             let payload = ProgressPayload {
                                 r#type: "progress".to_string(),
                                 task_id: task_id.clone(),
@@ -449,19 +501,6 @@ async fn process_task(
                     }
                     _ => {}
                 }
-            }
-
-            if !status_emitted {
-                let payload = ProgressPayload {
-                    r#type: "progress".to_string(),
-                    task_id: task_id.clone(),
-                    status: "error".to_string(),
-                    message: "进程意外终止".to_string(),
-                    current_page: 0,
-                    total_pages: 0,
-                    output_path: None,
-                };
-                let _ = app.emit("ocr-progress", payload);
             }
             let _ = child.kill();
         });
@@ -554,6 +593,52 @@ mod tests {
         // Clean up
         let kill_res = child.kill().await;
         assert!(kill_res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stderr_capture_mechanism() {
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/c", "echo err1>&2 && echo err2>&2 && echo err3>&2 && echo err4>&2"]);
+            c
+        } else {
+            let mut c = tokio::process::Command::new("sh");
+            c.args(["-c", "echo err1 >&2 && echo err2 >&2 && echo err3 >&2 && echo err4 >&2"]);
+            c
+        };
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut reader_err = tokio::io::BufReader::new(stderr);
+
+        let stderr_task = {
+            let mut buffer = Vec::<String>::new();
+            async move {
+                use tokio::io::AsyncBufReadExt;
+                let mut err_line = String::new();
+                while reader_err.read_line(&mut err_line).await.is_ok() {
+                    if err_line.is_empty() { break; }
+                    let trimmed = err_line.trim_end().to_string();
+                    if buffer.len() >= 3 {
+                        buffer.remove(0);
+                    }
+                    buffer.push(trimmed);
+                    err_line.clear();
+                }
+                buffer
+            }
+        };
+
+        let stderr_handle = tokio::spawn(stderr_task);
+        let buffer = stderr_handle.await.unwrap();
+        
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer[0], "err2");
+        assert_eq!(buffer[1], "err3");
+        assert_eq!(buffer[2], "err4");
+
+        let _ = child.wait().await;
     }
 }
 
