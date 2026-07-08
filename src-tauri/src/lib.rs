@@ -226,8 +226,9 @@ async fn process_task(
             let mut line_str = String::new();
 
             // Spawn stderr reading task
+            let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
             let stderr_task = {
-                let mut buffer = Vec::<String>::new();
+                let buffer = stderr_buffer.clone();
                 async move {
                     use tokio::io::AsyncBufReadExt;
                     let mut err_line = String::new();
@@ -235,16 +236,17 @@ async fn process_task(
                         if err_line.is_empty() { break; }
                         let trimmed = err_line.trim_end().to_string();
                         eprintln!("[Sidecar Stderr] {}", trimmed);
-                        if buffer.len() >= 3 {
-                            buffer.remove(0);
+                        if let Ok(mut buf) = buffer.lock() {
+                            if buf.len() >= 3 {
+                                buf.remove(0);
+                            }
+                            buf.push(trimmed);
                         }
-                        buffer.push(trimmed);
                         err_line.clear();
                     }
-                    buffer
                 }
             };
-            let mut stderr_handle = Some(tauri::async_runtime::spawn(stderr_task));
+            let _stderr_handle = tauri::async_runtime::spawn(stderr_task);
 
             loop {
                 use tokio::io::AsyncBufReadExt;
@@ -257,13 +259,16 @@ async fn process_task(
                     Ok(Ok(b)) => b,
                     Ok(Err(_)) | Err(_) => {
                         if !status_emitted {
-                            let stderr_buffer = match stderr_handle.take() {
-                                Some(h) => h.await.unwrap_or_default(),
-                                None => Vec::new(),
+                            let stderr_buffer_cloned = {
+                                if let Ok(buf) = stderr_buffer.lock() {
+                                    buf.clone()
+                                } else {
+                                    Vec::new()
+                                }
                             };
                             let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
-                            if !stderr_buffer.is_empty() {
-                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                            if !stderr_buffer_cloned.is_empty() {
+                                msg.push_str(&format!("。错误日志: {}", stderr_buffer_cloned.join(" | ")));
                             }
                             let payload = ProgressPayload {
                                 r#type: "progress".to_string(),
@@ -311,14 +316,17 @@ async fn process_task(
                 line_str.clear();
             }
 
-            let stderr_buffer = match stderr_handle.take() {
-                Some(h) => h.await.unwrap_or_default(),
-                None => Vec::new(),
+            let stderr_buffer_cloned = {
+                if let Ok(buf) = stderr_buffer.lock() {
+                    buf.clone()
+                } else {
+                    Vec::new()
+                }
             };
             if !status_emitted {
                 let mut msg = "进程意外终止".to_string();
-                if !stderr_buffer.is_empty() {
-                    msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                if !stderr_buffer_cloned.is_empty() {
+                    msg.push_str(&format!("。错误日志: {}", stderr_buffer_cloned.join(" | ")));
                 }
                 let payload = ProgressPayload {
                     r#type: "progress".to_string(),
@@ -502,6 +510,22 @@ async fn process_task(
                     _ => {}
                 }
             }
+            if !status_emitted {
+                let mut msg = "进程意外终止".to_string();
+                if !stderr_buffer.is_empty() {
+                    msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                }
+                let payload = ProgressPayload {
+                    r#type: "progress".to_string(),
+                    task_id: task_id.clone(),
+                    status: "error".to_string(),
+                    message: msg,
+                    current_page: 0,
+                    total_pages: 0,
+                    output_path: None,
+                };
+                let _ = app.emit("ocr-progress", payload);
+            }
             let _ = child.kill();
         });
     }
@@ -612,26 +636,35 @@ mod tests {
         let stderr = child.stderr.take().unwrap();
         let mut reader_err = tokio::io::BufReader::new(stderr);
 
+        let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let stderr_task = {
-            let mut buffer = Vec::<String>::new();
+            let buffer = stderr_buffer.clone();
             async move {
                 use tokio::io::AsyncBufReadExt;
                 let mut err_line = String::new();
                 while reader_err.read_line(&mut err_line).await.is_ok() {
                     if err_line.is_empty() { break; }
                     let trimmed = err_line.trim_end().to_string();
-                    if buffer.len() >= 3 {
-                        buffer.remove(0);
+                    if let Ok(mut buf) = buffer.lock() {
+                        if buf.len() >= 3 {
+                            buf.remove(0);
+                        }
+                        buf.push(trimmed);
                     }
-                    buffer.push(trimmed);
                     err_line.clear();
                 }
-                buffer
             }
         };
 
         let stderr_handle = tokio::spawn(stderr_task);
-        let buffer = stderr_handle.await.unwrap();
+        let _ = stderr_handle.await;
+        let buffer = {
+            if let Ok(buf) = stderr_buffer.lock() {
+                buf.clone()
+            } else {
+                Vec::new()
+            }
+        };
         
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer[0], "err2");
