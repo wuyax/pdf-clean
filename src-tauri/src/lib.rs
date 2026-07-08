@@ -28,7 +28,11 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
 
     #[cfg(debug_assertions)]
     {
-        let _ = app;
+        let ocr_models_dir = app.path()
+            .resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource)
+            .map_err(|e| e.to_string())?;
+        let ocr_models_str = ocr_models_dir.to_string_lossy().to_string();
+
         let python_bin = if cfg!(target_os = "windows") {
             "../python-sidecar/venv/Scripts/python.exe"
         } else {
@@ -38,6 +42,7 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
         let mut cmd = std::process::Command::new(python_bin);
         cmd.arg(script_path)
            .args(args)
+           .env("MODEL_DIR", &ocr_models_str)
            .stdout(std::process::Stdio::piped())
            .stderr(std::process::Stdio::inherit());
 
@@ -134,9 +139,26 @@ async fn process_task(
 
     #[cfg(debug_assertions)]
     {
-        let _ = app;
         std::thread::spawn(move || {
             let _permit_holder = permit;
+            let ocr_models_dir = match app.path().resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource) {
+                Ok(dir) => dir,
+                Err(e) => {
+                    let payload = ProgressPayload {
+                        r#type: "progress".to_string(),
+                        task_id: task_id.clone(),
+                        status: "error".to_string(),
+                        message: format!("获取模型目录失败: {}", e),
+                        current_page: 0,
+                        total_pages: 0,
+                        output_path: None,
+                    };
+                    let _ = app.emit("ocr-progress", payload);
+                    return;
+                }
+            };
+            let ocr_models_str = ocr_models_dir.to_string_lossy().to_string();
+
             let python_bin = if cfg!(target_os = "windows") {
                 "../python-sidecar/venv/Scripts/python.exe"
             } else {
@@ -146,6 +168,7 @@ async fn process_task(
             let mut cmd = std::process::Command::new(python_bin);
             cmd.arg(script_path)
                .args(args)
+               .env("MODEL_DIR", &ocr_models_str)
                .stdout(std::process::Stdio::piped())
                .stderr(std::process::Stdio::inherit());
 
