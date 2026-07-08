@@ -12,6 +12,8 @@ from scanner import classify_pdf
 @patch('os.path.exists', return_value=True)
 def test_classify_pure_image(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+    mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
     mock_page.get_text.return_value = "" # No text
     mock_page.rect = MagicMock(width=500, height=800)
@@ -28,6 +30,8 @@ def test_classify_pure_image(mock_exists):
 @patch('os.path.exists', return_value=True)
 def test_classify_decoy_format(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+    mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
     # Simulate decoy: text exists but is mostly special chars/whitespace
     mock_page.get_text.return_value = " \n!@#$%^&*()_+ \n " * 5 
@@ -60,6 +64,8 @@ def test_classify_decoy_format(mock_exists):
 @patch('os.path.exists', return_value=True)
 def test_classify_decoy_with_empty_ocr(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+    mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
     mock_page.get_text.return_value = "secret decoy text layer here" # 28 chars
     mock_doc.__getitem__.return_value = mock_page
