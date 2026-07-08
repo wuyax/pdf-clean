@@ -96,11 +96,7 @@ export function useTaskProcessor(
     });
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-
       const results = await scanFilesApi(paths);
-      clearTimeout(timeoutId);
 
       tasks.value.forEach(t => {
         if (paths.includes(t.path)) {
@@ -114,11 +110,7 @@ export function useTaskProcessor(
       tasks.value.forEach(t => {
         if (paths.includes(t.path)) {
           t.status = 'error';
-          if (err.name === 'AbortError') {
-            t.message = '分析超时';
-          } else {
-            t.message = '分析失败: ' + err.message;
-          }
+          t.message = '分析失败: ' + err.message;
         }
       });
     }

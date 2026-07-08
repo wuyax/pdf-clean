@@ -58,6 +58,29 @@ def test_subprocess_missing_args():
     assert data["type"] == "error"
     assert "Missing command" in data["message"]
 
+def test_subprocess_unknown_command():
+    code, out, err = run_cli_subprocess(["unknown"])
+    assert code == 1
+    data = json.loads(out.strip())
+    assert data["type"] == "error"
+    assert "Unknown command: unknown" in data["message"]
+
+def mock_classify_pdf_with_print(path):
+    print("Mock print statement to stdout")
+    return "TYPE_1"
+
+@patch("scanner.classify_pdf", side_effect=mock_classify_pdf_with_print)
+@patch("src.scanner.classify_pdf", side_effect=mock_classify_pdf_with_print)
+@patch("os.path.exists", return_value=True)
+def test_cli_scan_redirection(mock_exists, mock_classify1, mock_classify2):
+    code, out, err = run_cli_in_process(["scan", "dummy.pdf"])
+    assert code == 0
+    assert "Mock print statement to stdout" in err
+    assert "Mock print statement to stdout" not in out
+    data = json.loads(out.strip())
+    assert data["type"] == "scan_result"
+    assert data["results"]["dummy.pdf"] == "TYPE_1"
+
 @patch("scanner.classify_pdf", return_value="TYPE_1")
 @patch("src.scanner.classify_pdf", return_value="TYPE_1")
 @patch("os.path.exists", return_value=True)

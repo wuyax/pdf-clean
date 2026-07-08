@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import contextlib
 # Ensure current and parent directories are in path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -26,13 +27,15 @@ if __name__ == "__main__":
     if command == "scan":
         file_paths = sys.argv[2:]
         results = {}
-        for path in file_paths:
-            if os.path.exists(path):
-                results[path] = classify_pdf(path)
-            else:
-                results[path] = "NOT_FOUND"
-        print(json.dumps({"type": "scan_result", "results": results}))
-        sys.stdout.flush()
+        orig_stdout = sys.stdout
+        with contextlib.redirect_stdout(sys.stderr):
+            for path in file_paths:
+                if os.path.exists(path):
+                    results[path] = classify_pdf(path)
+                else:
+                    results[path] = "NOT_FOUND"
+        orig_stdout.write(json.dumps({"type": "scan_result", "results": results}) + "\n")
+        orig_stdout.flush()
         
     elif command == "process":
         args = sys.argv[2:]
@@ -58,19 +61,24 @@ if __name__ == "__main__":
             else:
                 i += 1
                 
+        orig_stdout = sys.stdout
+        
         if not input_path or not output_dir:
-            print(json.dumps({"type": "error", "task_id": task_id, "message": "Missing required arguments"}))
+            orig_stdout.write(json.dumps({"type": "error", "task_id": task_id, "message": "Missing required arguments"}) + "\n")
+            orig_stdout.flush()
             sys.exit(1)
             
         input_path = os.path.abspath(input_path)
         output_dir = os.path.abspath(output_dir)
         
         if not os.path.exists(input_path) or not os.path.isfile(input_path):
-            print(json.dumps({"type": "error", "task_id": task_id, "message": "Input file not found"}))
+            orig_stdout.write(json.dumps({"type": "error", "task_id": task_id, "message": "Input file not found"}) + "\n")
+            orig_stdout.flush()
             sys.exit(1)
             
         if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
-            print(json.dumps({"type": "error", "task_id": task_id, "message": "Invalid output directory"}))
+            orig_stdout.write(json.dumps({"type": "error", "task_id": task_id, "message": "Invalid output directory"}) + "\n")
+            orig_stdout.flush()
             sys.exit(1)
             
         filename = os.path.basename(input_path)
@@ -86,7 +94,8 @@ if __name__ == "__main__":
                     break
                 counter += 1
             else:
-                print(json.dumps({"type": "error", "task_id": task_id, "message": "Could not generate a unique filename"}))
+                orig_stdout.write(json.dumps({"type": "error", "task_id": task_id, "message": "Could not generate a unique filename"}) + "\n")
+                orig_stdout.flush()
                 sys.exit(1)
         else:
             output_filename = f"{name}_clean{ext}"
@@ -95,33 +104,39 @@ if __name__ == "__main__":
         # Validate path traversal
         output_dir_prefix = output_dir if output_dir.endswith(os.sep) else output_dir + os.sep
         if not output_path.startswith(output_dir_prefix):
-            print(json.dumps({"type": "error", "task_id": task_id, "message": "Path traversal attempt detected"}))
+            orig_stdout.write(json.dumps({"type": "error", "task_id": task_id, "message": "Path traversal attempt detected"}) + "\n")
+            orig_stdout.flush()
             sys.exit(1)
 
         def progress_callback(current, total, msg):
-            print(json.dumps({
+            orig_stdout.write(json.dumps({
                 "type": "progress",
                 "task_id": task_id,
                 "current_page": current,
                 "total_pages": total,
                 "message": msg
-            }))
-            sys.stdout.flush()
+            }) + "\n")
+            orig_stdout.flush()
             
         try:
-            process_pdf(input_path, output_path, progress_callback=progress_callback)
-            print(json.dumps({
+            with contextlib.redirect_stdout(sys.stderr):
+                process_pdf(input_path, output_path, progress_callback=progress_callback)
+            orig_stdout.write(json.dumps({
                 "type": "completed",
                 "task_id": task_id,
                 "output_path": output_path,
                 "message": "处理已完成"
-            }))
-            sys.stdout.flush()
+            }) + "\n")
+            orig_stdout.flush()
         except Exception as e:
-            print(json.dumps({
+            orig_stdout.write(json.dumps({
                 "type": "error",
                 "task_id": task_id,
                 "message": str(e)
-            }))
-            sys.stdout.flush()
+            }) + "\n")
+            orig_stdout.flush()
             sys.exit(1)
+
+    else:
+        print(json.dumps({"type": "error", "message": f"Unknown command: {command}"}))
+        sys.exit(1)
