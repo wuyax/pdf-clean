@@ -1,7 +1,8 @@
 import { ref, computed, Ref } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
+import { listen } from '@tauri-apps/api/event';
 import { Task, SaveMode, ConflictPolicy } from '../types/task';
-import { scanFilesApi, processTaskApi, getTaskStatusApi, getEventSourceUrl } from '../services/api';
+import { scanFilesApi, processTaskApi } from '../services/api';
 
 export function useTaskProcessor(
   saveMode: Ref<SaveMode>,
@@ -98,7 +99,7 @@ export function useTaskProcessor(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      const results = await scanFilesApi(paths, controller.signal);
+      const results = await scanFilesApi(paths);
       clearTimeout(timeoutId);
 
       tasks.value.forEach(t => {
@@ -164,72 +165,40 @@ export function useTaskProcessor(
         }
       }
 
-      const data = await processTaskApi({
-        input_path: task.path,
-        output_dir: outputDir,
-        conflict_policy: conflictPolicy.value
-      });
-      task.task_id = data.task_id;
+      const taskId = crypto.randomUUID();
+      task.task_id = taskId;
 
-      await new Promise<boolean>((resolve) => {
-        let retryCount = 0;
-        const maxRetries = 5;
+      await new Promise<boolean>(async (resolve) => {
+        let unlisten: (() => void) | null = null;
+        
+        unlisten = await listen('ocr-progress', (event: any) => {
+          const data = event.payload;
+          if (data.task_id !== taskId) return;
 
-        function connect() {
-          const eventSource = new EventSource(getEventSourceUrl(task.task_id!));
+          task.status = data.status;
+          task.message = data.message;
+          task.current_page = data.current_page;
+          task.total_pages = data.total_pages;
 
-          eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.status === 'not_found' && retryCount < maxRetries) {
-              return;
-            }
-            task.status = data.status;
-            task.message = data.message;
-            task.current_page = data.current_page;
-            task.total_pages = data.total_pages;
+          if (data.status === 'completed' || data.status === 'error') {
+            if (unlisten) unlisten();
+            resolve(data.status === 'completed');
+          }
+        });
 
-            if (data.status === 'completed' || data.status === 'error') {
-              eventSource.close();
-              resolve(data.status === 'completed');
-            }
-          };
-
-          eventSource.onerror = async () => {
-            eventSource.close();
-
-            try {
-              const statusData = await getTaskStatusApi(task.task_id!);
-              if (statusData.status === 'completed') {
-                task.status = 'completed';
-                task.message = statusData.message;
-                resolve(true);
-                return;
-              } else if (statusData.status === 'error') {
-                task.status = 'error';
-                task.message = statusData.message;
-                resolve(false);
-                return;
-              } else if (statusData.status === 'processing') {
-                if (retryCount < maxRetries) {
-                  retryCount++;
-                  task.message = `正在重新连接... (${retryCount}/${maxRetries})`;
-                  setTimeout(connect, 1500);
-                  return;
-                }
-              }
-            } catch (err) {
-              console.error("Error verifying task status during stream failure:", err);
-            }
-
-            if (task.status !== 'completed') {
-              task.status = 'error';
-              task.message = '流中断';
-            }
-            resolve(false);
-          };
+        try {
+          await processTaskApi({
+            input_path: task.path,
+            output_dir: outputDir,
+            conflict_policy: conflictPolicy.value,
+            task_id: taskId
+          });
+        } catch (err: any) {
+          task.status = 'error';
+          task.message = '启动失败: ' + err.message;
+          if (unlisten) unlisten();
+          resolve(false);
         }
-
-        connect();
       });
     } catch (err: any) {
       task.status = 'error';

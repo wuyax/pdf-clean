@@ -1,38 +1,20 @@
-import { ConflictPolicy } from '../types/task';
+import { invoke } from '@tauri-apps/api/core';
 
-const API_URL = 'http://127.0.0.1:8000';
-
-export async function scanFilesApi(paths: string[], signal?: AbortSignal): Promise<Record<string, string>> {
-  const response = await fetch(`${API_URL}/scan`, {
-    method: 'POST',
-    body: JSON.stringify({ file_paths: paths }),
-    headers: { 'Content-Type': 'application/json' },
-    signal
-  });
-  if (!response.ok) throw new Error(`Scan failed: ${response.status}`);
-  return response.json();
+export async function scanFilesApi(paths: string[]): Promise<Record<string, string>> {
+  return await invoke('scan_files', { paths });
 }
 
 export async function processTaskApi(payload: {
   input_path: string;
   output_dir: string;
-  conflict_policy: ConflictPolicy;
-}): Promise<{ task_id: string }> {
-  const response = await fetch(`${API_URL}/process`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    headers: { 'Content-Type': 'application/json' },
+  conflict_policy: string;
+  task_id: string;
+}): Promise<void> {
+  await invoke('process_task', {
+    inputPath: payload.input_path,
+    outputDir: payload.output_dir,
+    conflictPolicy: payload.conflict_policy,
+    taskId: payload.task_id
   });
-  if (!response.ok) throw new Error(`Process start failed: ${response.status}`);
-  return response.json();
 }
 
-export async function getTaskStatusApi(taskId: string): Promise<{ status: string; message: string }> {
-  const response = await fetch(`${API_URL}/status/${taskId}`);
-  if (!response.ok) throw new Error(`Get status failed: ${response.status}`);
-  return response.json();
-}
-
-export function getEventSourceUrl(taskId: string): string {
-  return `${API_URL}/stream/${taskId}`;
-}
