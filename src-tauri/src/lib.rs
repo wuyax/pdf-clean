@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-#[cfg(debug_assertions)]
-use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, TitleBarStyle};
 use tokio::sync::Semaphore;
@@ -39,7 +37,7 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
             "../python-sidecar/venv/bin/python"
         };
         let script_path = "../python-sidecar/src/main.py";
-        let mut cmd = std::process::Command::new(python_bin);
+        let mut cmd = tokio::process::Command::new(python_bin);
         cmd.arg(script_path)
            .args(args)
            .env("MODEL_DIR", &ocr_models_str)
@@ -54,21 +52,34 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
 
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn python venv: {}", e))?;
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
-        let reader = BufReader::new(stdout);
+        let mut reader = tokio::io::BufReader::new(stdout);
         let mut results = None;
+        let mut line_str = String::new();
 
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
+        let scan_fut = async {
+            use tokio::io::AsyncBufReadExt;
+            while reader.read_line(&mut line_str).await.is_ok() {
+                if line_str.is_empty() { break; }
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
                     if val["type"] == "scan_result" {
                         results = Some(val["results"].clone());
                         break;
                     }
                 }
+                line_str.clear();
             }
-        }
-        let _ = child.kill();
-        let _ = child.wait();
+            results
+        };
+
+        let results = match tokio::time::timeout(std::time::Duration::from_secs(30), scan_fut).await {
+            Ok(res) => res,
+            Err(_) => {
+                let _ = child.kill().await;
+                return Err("Scan timeout after 30 seconds".to_string());
+            }
+        };
+        let _ = child.kill().await;
+        let _ = child.wait().await;
         results.ok_or_else(|| "Failed to get scan results".to_string())
     }
 
@@ -91,24 +102,36 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
             .map_err(|e| e.to_string())?;
 
         let mut results = None;
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => {
-                    let line_str = String::from_utf8_lossy(&line);
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        if val["type"] == "scan_result" {
-                            results = Some(val["results"].clone());
-                            break;
+        let mut rx = rx;
+        let run_fut = async {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    CommandEvent::Stdout(line) => {
+                        let line_str = String::from_utf8_lossy(&line);
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                            if val["type"] == "scan_result" {
+                                results = Some(val["results"].clone());
+                                break;
+                            }
                         }
                     }
+                    CommandEvent::Stderr(line) => {
+                        eprintln!("[Sidecar Stderr] {}", String::from_utf8_lossy(&line).trim_end());
+                    }
+                    CommandEvent::Terminated(_) => break,
+                    _ => {}
                 }
-                CommandEvent::Stderr(line) => {
-                    eprintln!("[Sidecar Stderr] {}", String::from_utf8_lossy(&line).trim_end());
-                }
-                CommandEvent::Terminated(_) => break,
-                _ => {}
             }
-        }
+            results
+        };
+
+        let results = match tokio::time::timeout(std::time::Duration::from_secs(30), run_fut).await {
+            Ok(res) => res,
+            Err(_) => {
+                let _ = child.kill();
+                return Err("Scan sidecar timeout after 30 seconds".to_string());
+            }
+        };
         let _ = child.kill();
         results.ok_or_else(|| "Failed to get scan results from sidecar".to_string())
     }
@@ -139,7 +162,7 @@ async fn process_task(
 
     #[cfg(debug_assertions)]
     {
-        std::thread::spawn(move || {
+        tauri::async_runtime::spawn(async move {
             let _permit_holder = permit;
             let ocr_models_dir = match app.path().resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource) {
                 Ok(dir) => dir,
@@ -165,7 +188,7 @@ async fn process_task(
                 "../python-sidecar/venv/bin/python"
             };
             let script_path = "../python-sidecar/src/main.py";
-            let mut cmd = std::process::Command::new(python_bin);
+            let mut cmd = tokio::process::Command::new(python_bin);
             cmd.arg(script_path)
                .args(args)
                .env("MODEL_DIR", &ocr_models_str)
@@ -196,37 +219,65 @@ async fn process_task(
             };
 
             let stdout = child.stdout.take().expect("Failed to open stdout");
-            let reader = BufReader::new(stdout);
+            let mut reader = tokio::io::BufReader::new(stdout);
             let mut status_emitted = false;
+            let mut line_str = String::new();
 
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        let type_str = val["type"].as_str().unwrap_or("");
-                        let status = match type_str {
-                            "progress" => "processing",
-                            "completed" => {
-                                status_emitted = true;
-                                "completed"
-                            }
-                            _ => {
-                                status_emitted = true;
-                                "error"
-                            }
-                        };
-                        
-                        let payload = ProgressPayload {
-                            r#type: "progress".to_string(),
-                            task_id: task_id.clone(),
-                            status: status.to_string(),
-                            message: val["message"].as_str().unwrap_or("").to_string(),
-                            current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
-                            total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
-                            output_path: val["output_path"].as_str().map(|s| s.to_string()),
-                        };
-                        let _ = app.emit("ocr-progress", payload);
+            loop {
+                use tokio::io::AsyncBufReadExt;
+                let read_res = tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    reader.read_line(&mut line_str)
+                ).await;
+
+                let bytes_read = match read_res {
+                    Ok(Ok(b)) => b,
+                    Ok(Err(_)) | Err(_) => {
+                        if !status_emitted {
+                            let payload = ProgressPayload {
+                                r#type: "progress".to_string(),
+                                task_id: task_id.clone(),
+                                status: "error".to_string(),
+                                message: "OCR 进程超时或未响应(60秒)".to_string(),
+                                current_page: 0,
+                                total_pages: 0,
+                                output_path: None,
+                            };
+                            let _ = app.emit("ocr-progress", payload);
+                            status_emitted = true;
+                        }
+                        break;
                     }
+                };
+
+                if bytes_read == 0 { break; } // EOF
+
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                    let type_str = val["type"].as_str().unwrap_or("");
+                    let status = match type_str {
+                        "progress" => "processing",
+                        "completed" => {
+                            status_emitted = true;
+                            "completed"
+                        }
+                        _ => {
+                            status_emitted = true;
+                            "error"
+                        }
+                    };
+                    
+                    let payload = ProgressPayload {
+                        r#type: "progress".to_string(),
+                        task_id: task_id.clone(),
+                        status: status.to_string(),
+                        message: val["message"].as_str().unwrap_or("").to_string(),
+                        current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
+                        total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
+                        output_path: val["output_path"].as_str().map(|s| s.to_string()),
+                    };
+                    let _ = app.emit("ocr-progress", payload);
                 }
+                line_str.clear();
             }
 
             if !status_emitted {
@@ -242,8 +293,8 @@ async fn process_task(
                 let _ = app.emit("ocr-progress", payload);
             }
 
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         });
     }
 
@@ -316,8 +367,34 @@ async fn process_task(
             };
 
             let mut status_emitted = false;
+            let mut rx = rx;
 
-            while let Some(event) = rx.recv().await {
+            loop {
+                let event_opt = match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await {
+                    Ok(opt) => opt,
+                    Err(_) => {
+                        if !status_emitted {
+                            let payload = ProgressPayload {
+                                r#type: "progress".to_string(),
+                                task_id: task_id.clone(),
+                                status: "error".to_string(),
+                                message: "OCR 进程超时或未响应(60秒)".to_string(),
+                                current_page: 0,
+                                total_pages: 0,
+                                output_path: None,
+                            };
+                            let _ = app.emit("ocr-progress", payload);
+                            status_emitted = true;
+                        }
+                        break;
+                    }
+                };
+
+                let event = match event_opt {
+                    Some(ev) => ev,
+                    None => break, // EOF
+                };
+
                 match event {
                     CommandEvent::Stdout(line) => {
                         let line_str = String::from_utf8_lossy(&line);
@@ -445,6 +522,38 @@ mod tests {
             semaphore.clone().acquire_owned()
         ).await;
         assert!(p3.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_timeout_mechanism() {
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = tokio::process::Command::new("ping");
+            c.args(["127.0.0.1", "-n", "3"]);
+            c
+        } else {
+            let mut c = tokio::process::Command::new("sleep");
+            c.arg("2");
+            c
+        };
+        cmd.stdout(std::process::Stdio::piped());
+        
+        let mut child = cmd.spawn().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut reader = tokio::io::BufReader::new(stdout);
+        let mut line_str = String::new();
+        
+        let fut = async {
+            use tokio::io::AsyncBufReadExt;
+            let _ = reader.read_line(&mut line_str).await;
+        };
+        
+        // Wrap with a 100ms timeout
+        let res = tokio::time::timeout(std::time::Duration::from_millis(100), fut).await;
+        assert!(res.is_err(), "Expected timeout error");
+        
+        // Clean up
+        let kill_res = child.kill().await;
+        assert!(kill_res.is_ok());
     }
 }
 
