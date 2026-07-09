@@ -2,7 +2,7 @@ import { ref, computed, Ref } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { Task, SaveMode, ConflictPolicy } from '../types/task';
-import { scanFilesApi, processTaskApi } from '../services/api';
+import { scanFilesApi, processTaskApi, abortTaskApi } from '../services/api';
 
 export function useTaskProcessor(
   saveMode: Ref<SaveMode>,
@@ -198,6 +198,16 @@ export function useTaskProcessor(
     }
   }
 
+  async function abortTask(path: string) {
+    const task = tasks.value.find(t => t.path === path);
+    if (!task || !task.task_id || task.status !== 'processing') return;
+    try {
+      await abortTaskApi(task.task_id);
+    } catch (err: any) {
+      console.error('Failed to abort task:', err);
+    }
+  }
+
   function removeTask(path: string) {
     tasks.value = tasks.value.filter(t => t.path !== path || t.status === 'processing');
   }
@@ -232,6 +242,7 @@ export function useTaskProcessor(
     removeTask,
     clearAll,
     toggleAll,
-    toggleFilter
+    toggleFilter,
+    abortTask
   };
 }

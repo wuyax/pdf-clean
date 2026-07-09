@@ -6,7 +6,7 @@ A desktop application to clear "OCR decoy layers" from PDFs and rebuild them wit
 - Completely removes hidden decoy text by rasterizing PDF pages.
 - Reconstructs searchable text using high-accuracy PaddleOCR.
 - Lightweight Tauri v2 + Vue 3 frontend.
-- Python FastAPI sidecar for AI processing.
+- Python CLI sidecar (RapidOCR ONNX) for AI processing.
 
 ## Prerequisites
 
@@ -24,7 +24,10 @@ cd python-sidecar
 python -m venv venv
 source venv/bin/activate # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python src/main.py
+# The Python sidecar is executed on-demand as a CLI by Tauri.
+# You can manually run tests or verify models:
+python download_models.py
+pytest
 ```
 
 ### Frontend (Tauri)

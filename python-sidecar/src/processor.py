@@ -116,15 +116,27 @@ def insert_character_level_text(page, rect, text, fontname="china-ss", render_mo
                 render_mode=render_mode
             )
         except Exception:
-            # Fallback 机制：如果指定的 fontname (china-ss) 加载失败，尝试回退到无字体名模式
-            page.insert_text(
-                baseline_pt, 
-                char, 
-                fontsize=fs, 
-                color=color, 
-                fill_opacity=fill_opacity,
-                render_mode=render_mode
-            )
+            try:
+                # 尝试二级回退：使用简体的内置 CJK 字体 china-s
+                page.insert_text(
+                    baseline_pt, 
+                    char, 
+                    fontname="china-s",
+                    fontsize=fs, 
+                    color=color, 
+                    fill_opacity=fill_opacity,
+                    render_mode=render_mode
+                )
+            except Exception:
+                # 三级终极回退：无字体模式
+                page.insert_text(
+                    baseline_pt, 
+                    char, 
+                    fontsize=fs, 
+                    color=color, 
+                    fill_opacity=fill_opacity,
+                    render_mode=render_mode
+                )
             
         current_x += char_width
 
@@ -262,8 +274,12 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 gc.collect()
                 
             except Exception as e:
-                print(f"  Page {page_num} Error: {e}")
-                continue
+                print(f"  Page {page_num} Error: {e}, falling back to original page copy.")
+                try:
+                    # 拷贝原 PDF 页面至输出 PDF，保留原样
+                    doc_out.insert_pdf(doc_src, from_page=page_num, to_page=page_num)
+                except Exception as fallback_err:
+                    print(f"  Failed to insert original page fallback: {fallback_err}")
         
         print("Saving PDF...")
         # garbage=4 (最大程度压缩清理无用对象), deflate=True (开启流压缩)

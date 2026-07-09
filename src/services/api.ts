@@ -18,3 +18,7 @@ export async function processTaskApi(payload: {
   });
 }
 
+export async function abortTaskApi(taskId: string): Promise<void> {
+  await invoke('abort_task', { taskId });
+}
+
