@@ -43,6 +43,7 @@
           :tasks="filteredTasks"
           @toggle-all="toggleAll"
           @remove-task="removeTask"
+          @abort-task="abortTask"
         />
 
         <!-- Global Drag Overlay -->
@@ -115,6 +116,7 @@ const {
   clearAll,
   toggleAll,
   toggleFilter,
+  abortTask,
 } = useTaskProcessor(saveMode, customOutputDir, conflictPolicy, resolvedQuality);
 
 // Initialize File Drop Composable
