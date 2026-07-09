@@ -91,3 +91,48 @@ def test_classify_decoy_with_empty_ocr(mock_exists):
          patch('scanner.get_ocr_for_scan', return_value=mock_ocr):
         category = classify_pdf("dummy.pdf")
         assert category == "TYPE_2"
+
+@patch('os.path.exists', return_value=True)
+def test_classify_multi_page_with_decoy(mock_exists):
+    mock_doc = MagicMock()
+    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+    mock_doc.__exit__ = MagicMock(return_value=False)
+    mock_doc.__len__.return_value = 3
+    
+    # Page 1 (index 0): Normal text page
+    mock_page1 = MagicMock()
+    mock_page1.rect = MagicMock(width=500, height=800)
+    mock_page1.get_images.return_value = []
+    mock_page1.get_text.return_value = "Normal text layer on page 1"
+    
+    # Page 2 (index 1): Decoy page
+    mock_page2 = MagicMock()
+    mock_page2.rect = MagicMock(width=500, height=800)
+    mock_page2.get_text.return_value = "secret decoy text layer on page 2"
+    mock_page2.get_images.return_value = [(i, 0, 500, 20, 8, 'RGB', '', f'img{i}', 'DCT', 0) for i in range(30)]
+    mock_page2.get_image_rects.side_effect = lambda xref: [MagicMock(width=500, height=20)]
+    
+    mock_pix = MagicMock()
+    mock_pix.width = 100
+    mock_pix.height = 100
+    mock_pix.samples = b'\x00' * (100 * 100 * 3)
+    mock_page2.get_pixmap.return_value = mock_pix
+    
+    # Page 3 (index 2): Normal text page
+    mock_page3 = MagicMock()
+    mock_page3.rect = MagicMock(width=500, height=800)
+    mock_page3.get_images.return_value = []
+    mock_page3.get_text.return_value = "Normal text layer on page 3"
+    
+    pages = {0: mock_page1, 1: mock_page2, 2: mock_page3}
+    mock_doc.__getitem__.side_effect = lambda idx: pages[idx]
+    
+    # Mock OCR returning nothing
+    mock_ocr = MagicMock()
+    results = [[[[0, 0], [10, 0], [10, 10], [0, 10]], '', 0.0]]
+    mock_ocr.return_value = (results, 0.1)
+    
+    with patch('fitz.open', return_value=mock_doc), \
+         patch('scanner.get_ocr_for_scan', return_value=mock_ocr):
+        category = classify_pdf("dummy.pdf")
+        assert category == "TYPE_2"
