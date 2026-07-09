@@ -7,7 +7,8 @@ import { scanFilesApi, processTaskApi, abortTaskApi } from '../services/api';
 export function useTaskProcessor(
   saveMode: Ref<SaveMode>,
   customOutputDir: Ref<string>,
-  conflictPolicy: Ref<ConflictPolicy>
+  conflictPolicy: Ref<ConflictPolicy>,
+  resolvedQuality: Ref<{ dpi: number; quality: number }>
 ) {
   const tasks = ref<Task[]>([]);
   const isGlobalProcessing = ref(false);
@@ -183,7 +184,9 @@ export function useTaskProcessor(
             input_path: task.path,
             output_dir: outputDir,
             conflict_policy: conflictPolicy.value,
-            task_id: taskId
+            task_id: taskId,
+            dpi: resolvedQuality.value.dpi,
+            quality: resolvedQuality.value.quality
           });
         } catch (err: any) {
           task.status = 'error';

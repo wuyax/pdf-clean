@@ -47,6 +47,8 @@ if __name__ == "__main__":
         output_dir = None
         conflict_policy = "overwrite"
         task_id = "default"
+        dpi = 300
+        quality = 85
         
         i = 0
         while i < len(args):
@@ -61,6 +63,12 @@ if __name__ == "__main__":
                 i += 2
             elif args[i] == "--task-id" and i + 1 < len(args):
                 task_id = args[i+1]
+                i += 2
+            elif args[i] == "--dpi" and i + 1 < len(args):
+                dpi = int(args[i+1])
+                i += 2
+            elif args[i] == "--quality" and i + 1 < len(args):
+                quality = int(args[i+1])
                 i += 2
             else:
                 i += 1
@@ -124,7 +132,7 @@ if __name__ == "__main__":
             
         try:
             with contextlib.redirect_stdout(sys.stderr):
-                process_pdf(input_path, output_path, progress_callback=progress_callback)
+                process_pdf(input_path, output_path, progress_callback=progress_callback, dpi=dpi, quality=quality)
             orig_stdout.write(json.dumps({
                 "type": "completed",
                 "task_id": task_id,

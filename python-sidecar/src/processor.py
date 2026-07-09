@@ -140,7 +140,7 @@ def insert_character_level_text(page, rect, text, fontname="china-ss", render_mo
             
         current_x += char_width
 
-def process_pdf(input_path: str, output_path: str, progress_callback=None):
+def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: int = 300, quality: int = 85):
     """
     主处理流程：
     1. 将 PDF 页面渲染为高分辨率(200 DPI)图片用于背景。
@@ -176,7 +176,7 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 # 1. 【高分辨率背景图】 (300 DPI)
                 # 这张图作为最终输出 PDF 的可见底层。300 DPI 是清晰度与体积的最佳平衡点。
                 # 【极其重要】：alpha=False 强制丢弃透明通道。
-                pix_bg = page_src.get_pixmap(dpi=300, alpha=False)
+                pix_bg = page_src.get_pixmap(dpi=dpi, alpha=False)
                 
                 # 使用 PIL 进行高级 JPEG 压缩 (TinyJPG 风格)
                 img_pil = Image.frombytes("RGB", [pix_bg.width, pix_bg.height], pix_bg.samples)
@@ -184,7 +184,7 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None):
                 img_pil.save(
                     img_bytes_io, 
                     format="JPEG", 
-                    quality=85, 
+                    quality=quality, 
                     optimize=True, 
                     progressive=True,
                     subsampling=0 # 4:4:4 保持文字边缘锐利

@@ -9,12 +9,16 @@ export async function processTaskApi(payload: {
   output_dir: string;
   conflict_policy: string;
   task_id: string;
+  dpi: number;
+  quality: number;
 }): Promise<void> {
   await invoke('process_task', {
     inputPath: payload.input_path,
     outputDir: payload.output_dir,
     conflictPolicy: payload.conflict_policy,
-    taskId: payload.task_id
+    taskId: payload.task_id,
+    dpi: payload.dpi,
+    quality: payload.quality
   });
 }
 

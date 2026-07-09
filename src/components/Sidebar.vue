@@ -143,6 +143,54 @@
         </div>
       </div>
 
+      <!-- Quality Settings Card -->
+      <div class="space-y-4 bg-white/50 border border-slate-200/60 rounded-xl p-3">
+        <div class="text-[11px] font-bold text-slate-500 uppercase tracking-tight">清洗质量</div>
+        
+        <!-- Quality Preset Options -->
+        <div class="space-y-2.5">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input 
+              type="radio" 
+              :value="'standard'" 
+              :checked="qualityPreset === 'standard'"
+              @change="$emit('update:qualityPreset', 'standard')"
+              class="w-3.5 h-3.5 mt-0.5 text-blue-600 border-slate-300 focus:ring-blue-500" 
+            />
+            <div class="flex flex-col">
+              <span class="text-xs font-medium text-slate-700">标准 (72 DPI)</span>
+              <span class="text-[10px] text-slate-400">适合屏幕阅读，体积极小</span>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input 
+              type="radio" 
+              :value="'high'" 
+              :checked="qualityPreset === 'high'"
+              @change="$emit('update:qualityPreset', 'high')"
+              class="w-3.5 h-3.5 mt-0.5 text-blue-600 border-slate-300 focus:ring-blue-500" 
+            />
+            <div class="flex flex-col">
+              <span class="text-xs font-medium text-slate-700">清晰 (150 DPI)</span>
+              <span class="text-[10px] text-slate-400">推荐日常使用，平衡体积与画质</span>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input 
+              type="radio" 
+              :value="'max'" 
+              :checked="qualityPreset === 'max'"
+              @change="$emit('update:qualityPreset', 'max')"
+              class="w-3.5 h-3.5 mt-0.5 text-blue-600 border-slate-300 focus:ring-blue-500" 
+            />
+            <div class="flex flex-col">
+              <span class="text-xs font-medium text-slate-700">超清 (300 DPI)</span>
+              <span class="text-[10px] text-slate-400">适合高精度打印，体积较大</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <!-- Global Progress (Visible during processing) -->
       <div v-if="isGlobalProcessing || completedTaskCount > 0" class="space-y-3 bg-white/50 border border-slate-200/60 rounded-xl p-3">
         <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-tight">
@@ -173,6 +221,7 @@
 <script setup lang="ts">
 import { Zap, Loader2, FilePlus, Trash2, Clock } from '@lucide/vue';
 import { SaveMode, ConflictPolicy } from '../types/task';
+import { QualityPreset } from '../composables/useSettings';
 
 defineProps<{
   isGlobalProcessing: boolean;
@@ -180,6 +229,7 @@ defineProps<{
   saveMode: SaveMode;
   customOutputDir: string;
   conflictPolicy: ConflictPolicy;
+  qualityPreset: QualityPreset;
   filterStatus: string[];
   tasksCount: number;
   processingCount: number;
@@ -193,6 +243,7 @@ defineEmits<{
   (e: 'update:saveMode', val: SaveMode): void;
   (e: 'update:customOutputDir', val: string): void;
   (e: 'update:conflictPolicy', val: ConflictPolicy): void;
+  (e: 'update:qualityPreset', val: QualityPreset): void;
   (e: 'start-processing'): void;
   (e: 'select-files'): void;
   (e: 'clear-all'): void;

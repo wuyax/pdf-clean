@@ -15,6 +15,7 @@
         v-model:save-mode="saveMode"
         v-model:custom-output-dir="customOutputDir"
         v-model:conflict-policy="conflictPolicy"
+        v-model:quality-preset="qualityPreset"
         :is-global-processing="isGlobalProcessing"
         :has-selected-tasks="hasSelectedTasks"
         :filter-status="filterStatus"
@@ -90,6 +91,8 @@ const {
   saveMode,
   customOutputDir,
   conflictPolicy,
+  qualityPreset,
+  resolvedQuality,
   selectCustomOutputDir,
   error: settingsError,
 } = useSettings();
@@ -112,7 +115,7 @@ const {
   clearAll,
   toggleAll,
   toggleFilter,
-} = useTaskProcessor(saveMode, customOutputDir, conflictPolicy);
+} = useTaskProcessor(saveMode, customOutputDir, conflictPolicy, resolvedQuality);
 
 // Initialize File Drop Composable
 const {

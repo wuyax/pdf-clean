@@ -145,6 +145,8 @@ async fn process_task(
     output_dir: String,
     conflict_policy: String,
     task_id: String,
+    dpi: u32,
+    quality: u8,
     app: AppHandle,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
@@ -160,6 +162,10 @@ async fn process_task(
         conflict_policy,
         "--task-id".to_string(),
         task_id.clone(),
+        "--dpi".to_string(),
+        dpi.to_string(),
+        "--quality".to_string(),
+        quality.to_string(),
     ];
 
     #[cfg(debug_assertions)]
