@@ -76,7 +76,7 @@
               </div>
             </div>
             <button 
-              @click="handleAbort(task); $emit('abort-task', task.path)"
+              @click="$emit('abort-task', task.path)"
               class="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-all active:scale-90"
               title="中止任务"
             >
@@ -143,19 +143,7 @@ const props = defineProps<{
   tasks: Task[];
 }>();
 
-import { abortTaskApi } from '../services/api';
-
 const emit = defineEmits(['toggle-all', 'remove-task', 'abort-task']);
-
-async function handleAbort(task: Task) {
-  if (task.task_id && task.status === 'processing') {
-    try {
-      await abortTaskApi(task.task_id);
-    } catch (err) {
-      console.error('Failed to abort task:', err);
-    }
-  }
-}
 
 const allSelected = computed(() => {
   return props.tasks.length > 0 && props.tasks.every(t => t.selected);
