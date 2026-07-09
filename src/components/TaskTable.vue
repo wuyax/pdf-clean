@@ -60,19 +60,28 @@
 
         <!-- Progress / Status -->
         <div class="w-40 px-4 flex flex-col items-end gap-1.5">
-          <div v-if="task.status === 'processing'" class="w-full">
-            <div class="flex justify-between items-center mb-1 tabular-nums">
-              <span class="text-[10px] font-medium text-blue-600 animate-pulse">{{ task.message }}</span>
-              <span class="text-[10px] font-bold text-blue-600">{{ Math.round((task.current_page / task.total_pages) * 100) || 0 }}%</span>
-            </div>
-            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden relative shadow-inner">
-              <div 
-                class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-in-out relative" 
-                :style="{ width: `${(task.current_page / task.total_pages) * 100 || 0}%` }"
-              >
-                <div class="absolute inset-0 shimmer-effect opacity-50"></div>
+          <div v-if="task.status === 'processing'" class="w-full flex items-center gap-2">
+            <div class="flex-1">
+              <div class="flex justify-between items-center mb-1 tabular-nums">
+                <span class="text-[10px] font-medium text-blue-600 animate-pulse">{{ task.message }}</span>
+                <span class="text-[10px] font-bold text-blue-600">{{ Math.round((task.current_page / task.total_pages) * 100) || 0 }}%</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden relative shadow-inner">
+                <div 
+                  class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-in-out relative" 
+                  :style="{ width: `${(task.current_page / task.total_pages) * 100 || 0}%` }"
+                >
+                  <div class="absolute inset-0 shimmer-effect opacity-50"></div>
+                </div>
               </div>
             </div>
+            <button 
+              @click="handleAbort(task); $emit('abort-task', task.path)"
+              class="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-all active:scale-90"
+              title="中止任务"
+            >
+              <XCircle class="w-4 h-4" />
+            </button>
           </div>
 
           <div v-else-if="task.status === 'completed'" class="flex items-center gap-1.5 text-emerald-600">
@@ -126,14 +135,27 @@ import {
   CheckCircle2, 
   AlertCircle, 
   RefreshCw, 
-  Trash2 
+  Trash2,
+  XCircle
 } from '@lucide/vue';
 
 const props = defineProps<{
   tasks: Task[];
 }>();
 
-const emit = defineEmits(['toggle-all', 'remove-task']);
+import { abortTaskApi } from '../services/api';
+
+const emit = defineEmits(['toggle-all', 'remove-task', 'abort-task']);
+
+async function handleAbort(task: Task) {
+  if (task.task_id && task.status === 'processing') {
+    try {
+      await abortTaskApi(task.task_id);
+    } catch (err) {
+      console.error('Failed to abort task:', err);
+    }
+  }
+}
 
 const allSelected = computed(() => {
   return props.tasks.length > 0 && props.tasks.every(t => t.selected);
