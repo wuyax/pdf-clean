@@ -136,7 +136,8 @@ import {
   AlertCircle, 
   RefreshCw, 
   Trash2,
-  XCircle
+  XCircle,
+  Lock
 } from '@lucide/vue';
 
 const props = defineProps<{
@@ -167,6 +168,7 @@ function categoryLabel(cat: string) {
     case 'TYPE_2': return '干扰';
     case 'TYPE_3': return 'OCR';
     case 'TYPE_4': return '全图';
+    case 'TYPE_ENCRYPTED': return '已加密';
     case 'NOT_FOUND': return '错误';
     default: return '待分析';
   }
@@ -176,6 +178,7 @@ function categoryClass(cat: string) {
   switch (cat) {
     case 'TYPE_2':
     case 'TYPE_4': return 'bg-amber-50 text-amber-600 border-amber-200/60';
+    case 'TYPE_ENCRYPTED': return 'bg-rose-50 text-rose-600 border-rose-200/60';
     case 'TYPE_1':
     case 'TYPE_3': return 'bg-blue-50 text-blue-600 border-blue-200/60';
     default: return 'bg-slate-50 text-slate-400 border-slate-200/60';
@@ -188,6 +191,7 @@ function getCategoryIcon(cat: string) {
     case 'TYPE_2': return FileX;
     case 'TYPE_3': return ScanText;
     case 'TYPE_4': return FileImage;
+    case 'TYPE_ENCRYPTED': return Lock;
     case 'NOT_FOUND': return FileWarning;
     default: return Files;
   }

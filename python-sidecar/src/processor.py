@@ -154,6 +154,8 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
     print(f"Dual-Res Processing: {input_path}")
     
     doc_src = fitz.open(input_path)
+    if doc_src.is_encrypted:
+        raise ValueError("该 PDF 文件受密码保护或已被加密，请解密后重试。")
     total_pages = len(doc_src)
     doc_out = fitz.open()
     

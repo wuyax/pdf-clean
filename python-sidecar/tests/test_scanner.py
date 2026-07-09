@@ -12,6 +12,7 @@ from scanner import classify_pdf
 @patch('os.path.exists', return_value=True)
 def test_classify_pure_image(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.is_encrypted = False
     mock_doc.__enter__ = MagicMock(return_value=mock_doc)
     mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
@@ -30,6 +31,7 @@ def test_classify_pure_image(mock_exists):
 @patch('os.path.exists', return_value=True)
 def test_classify_decoy_format(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.is_encrypted = False
     mock_doc.__enter__ = MagicMock(return_value=mock_doc)
     mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
@@ -64,6 +66,7 @@ def test_classify_decoy_format(mock_exists):
 @patch('os.path.exists', return_value=True)
 def test_classify_decoy_with_empty_ocr(mock_exists):
     mock_doc = MagicMock()
+    mock_doc.is_encrypted = False
     mock_doc.__enter__ = MagicMock(return_value=mock_doc)
     mock_doc.__exit__ = MagicMock(return_value=False)
     mock_page = MagicMock()
@@ -91,3 +94,14 @@ def test_classify_decoy_with_empty_ocr(mock_exists):
          patch('scanner.get_ocr_for_scan', return_value=mock_ocr):
         category = classify_pdf("dummy.pdf")
         assert category == "TYPE_2"
+
+@patch('os.path.exists', return_value=True)
+def test_classify_encrypted_pdf(mock_exists):
+    mock_doc = MagicMock()
+    mock_doc.is_encrypted = True
+    mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+    mock_doc.__exit__ = MagicMock(return_value=False)
+    
+    with patch('fitz.open', return_value=mock_doc):
+        category = classify_pdf("dummy.pdf")
+        assert category == "TYPE_ENCRYPTED"

@@ -25,6 +25,8 @@ def classify_pdf(file_path: str) -> str:
 
     try:
         with fitz.open(file_path) as doc:
+            if doc.is_encrypted:
+                return "TYPE_ENCRYPTED"
             if len(doc) == 0:
                 return "TYPE_UNKNOWN"
             
