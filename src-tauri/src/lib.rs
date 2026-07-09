@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, TitleBarStyle};
 use tokio::sync::Semaphore;
 
 struct AppState {
     semaphore: Arc<Semaphore>,
+    active_tasks: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
 
 
@@ -248,73 +250,112 @@ async fn process_task(
             };
             let _stderr_handle = tauri::async_runtime::spawn(stderr_task);
 
+            // 每次任务开始时，在 active_tasks 中注册
+            let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
+            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                tasks.insert(task_id.clone(), abort_tx);
+            }
+            
+            // 在退出/完成后清理
+            let cleanup_task_id = task_id.clone();
+            let app_cleanup = app.clone();
+            let cleanup = move || {
+                if let Ok(mut tasks) = app_cleanup.state::<AppState>().active_tasks.lock() {
+                    tasks.remove(&cleanup_task_id);
+                }
+            };
+
             loop {
                 use tokio::io::AsyncBufReadExt;
-                let read_res = tokio::time::timeout(
+                let read_res_fut = tokio::time::timeout(
                     std::time::Duration::from_secs(60),
                     reader_out.read_line(&mut line_str)
-                ).await;
+                );
 
-                let bytes_read = match read_res {
-                    Ok(Ok(b)) => b,
-                    Ok(Err(_)) | Err(_) => {
-                        if !status_emitted {
-                            let stderr_buffer_cloned = {
-                                if let Ok(buf) = stderr_buffer.lock() {
-                                    buf.clone()
-                                } else {
-                                    Vec::new()
+                tokio::select! {
+                    read_res = read_res_fut => {
+                        let bytes_read = match read_res {
+                            Ok(Ok(b)) => b,
+                            Ok(Err(_)) | Err(_) => {
+                                if !status_emitted {
+                                    let stderr_buffer_cloned = {
+                                        if let Ok(buf) = stderr_buffer.lock() {
+                                            buf.clone()
+                                        } else {
+                                            Vec::new()
+                                        }
+                                    };
+                                    let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
+                                    if !stderr_buffer_cloned.is_empty() {
+                                        msg.push_str(&format!("。错误日志: {}", stderr_buffer_cloned.join(" | ")));
+                                    }
+                                    let payload = ProgressPayload {
+                                        r#type: "progress".to_string(),
+                                        task_id: task_id.clone(),
+                                        status: "error".to_string(),
+                                        message: msg,
+                                        current_page: 0,
+                                        total_pages: 0,
+                                        output_path: None,
+                                    };
+                                    let _ = app.emit("ocr-progress", payload);
+                                    status_emitted = true;
+                                }
+                                break;
+                            }
+                        };
+
+                        if bytes_read == 0 { break; }
+
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                            let type_str = val["type"].as_str().unwrap_or("");
+                            let status = match type_str {
+                                "progress" => "processing",
+                                "completed" => {
+                                    status_emitted = true;
+                                    "completed"
+                                }
+                                _ => {
+                                    status_emitted = true;
+                                    "error"
                                 }
                             };
-                            let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
-                            if !stderr_buffer_cloned.is_empty() {
-                                msg.push_str(&format!("。错误日志: {}", stderr_buffer_cloned.join(" | ")));
-                            }
+                            
                             let payload = ProgressPayload {
                                 r#type: "progress".to_string(),
                                 task_id: task_id.clone(),
-                                status: "error".to_string(),
-                                message: msg,
-                                current_page: 0,
-                                total_pages: 0,
-                                output_path: None,
+                                status: status.to_string(),
+                                message: val["message"].as_str().unwrap_or("").to_string(),
+                                current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
+                                total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
+                                output_path: val["output_path"].as_str().map(|s| s.to_string()),
                             };
                             let _ = app.emit("ocr-progress", payload);
-                            status_emitted = true;
                         }
+                        line_str.clear();
+                    }
+                    _ = &mut abort_rx => {
+                        // 收到取消信号
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                        
+                        let payload = ProgressPayload {
+                            r#type: "progress".to_string(),
+                            task_id: task_id.clone(),
+                            status: "error".to_string(),
+                            message: "用户已中止清理".to_string(),
+                            current_page: 0,
+                            total_pages: 0,
+                            output_path: None,
+                        };
+                        let _ = app.emit("ocr-progress", payload);
+                        status_emitted = true;
                         break;
                     }
-                };
-
-                if bytes_read == 0 { break; }
-
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                    let type_str = val["type"].as_str().unwrap_or("");
-                    let status = match type_str {
-                        "progress" => "processing",
-                        "completed" => {
-                            status_emitted = true;
-                            "completed"
-                        }
-                        _ => {
-                            status_emitted = true;
-                            "error"
-                        }
-                    };
-                    
-                    let payload = ProgressPayload {
-                        r#type: "progress".to_string(),
-                        task_id: task_id.clone(),
-                        status: status.to_string(),
-                        message: val["message"].as_str().unwrap_or("").to_string(),
-                        current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
-                        total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
-                        output_path: val["output_path"].as_str().map(|s| s.to_string()),
-                    };
-                    let _ = app.emit("ocr-progress", payload);
                 }
-                line_str.clear();
             }
+
+            cleanup();
 
             let stderr_buffer_cloned = {
                 if let Ok(buf) = stderr_buffer.lock() {
@@ -417,99 +458,139 @@ async fn process_task(
             let mut rx = rx;
             let mut stderr_buffer = Vec::<String>::new();
 
+            // 每次任务开始时，在 active_tasks 中注册
+            let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
+            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                tasks.insert(task_id.clone(), abort_tx);
+            }
+            
+            // 在退出/完成后清理
+            let cleanup_task_id = task_id.clone();
+            let app_cleanup = app.clone();
+            let cleanup = move || {
+                if let Ok(mut tasks) = app_cleanup.state::<AppState>().active_tasks.lock() {
+                    tasks.remove(&cleanup_task_id);
+                }
+            };
+
             loop {
-                let event_opt = match tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv()).await {
-                    Ok(opt) => opt,
-                    Err(_) => {
-                        if !status_emitted {
-                            let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
-                            if !stderr_buffer.is_empty() {
-                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                let rx_recv_fut = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv());
+                
+                tokio::select! {
+                    event_res = rx_recv_fut => {
+                        let event_opt = match event_res {
+                            Ok(opt) => opt,
+                            Err(_) => {
+                                if !status_emitted {
+                                    let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
+                                    if !stderr_buffer.is_empty() {
+                                        msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                                    }
+                                    let payload = ProgressPayload {
+                                        r#type: "progress".to_string(),
+                                        task_id: task_id.clone(),
+                                        status: "error".to_string(),
+                                        message: msg,
+                                        current_page: 0,
+                                        total_pages: 0,
+                                        output_path: None,
+                                    };
+                                    let _ = app.emit("ocr-progress", payload);
+                                    status_emitted = true;
+                                }
+                                break;
                             }
-                            let payload = ProgressPayload {
-                                r#type: "progress".to_string(),
-                                task_id: task_id.clone(),
-                                status: "error".to_string(),
-                                message: msg,
-                                current_page: 0,
-                                total_pages: 0,
-                                output_path: None,
-                            };
-                            let _ = app.emit("ocr-progress", payload);
-                            status_emitted = true;
+                        };
+
+                        let event = match event_opt {
+                            Some(ev) => ev,
+                            None => break,
+                        };
+
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let line_str = String::from_utf8_lossy(&line);
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                                    let type_str = val["type"].as_str().unwrap_or("");
+                                    let status = match type_str {
+                                        "progress" => "processing",
+                                        "completed" => {
+                                            status_emitted = true;
+                                            "completed"
+                                        }
+                                        _ => {
+                                            status_emitted = true;
+                                            "error"
+                                        }
+                                    };
+                                    
+                                    let payload = ProgressPayload {
+                                        r#type: "progress".to_string(),
+                                        task_id: task_id.clone(),
+                                        status: status.to_string(),
+                                        message: val["message"].as_str().unwrap_or("").to_string(),
+                                        current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
+                                        total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
+                                        output_path: val["output_path"].as_str().map(|s| s.to_string()),
+                                    };
+                                    let _ = app.emit("ocr-progress", payload);
+                                }
+                            }
+                            CommandEvent::Stderr(line) => {
+                                let line_str = String::from_utf8_lossy(&line).trim_end().to_string();
+                                eprintln!("[Sidecar Stderr] {}", line_str);
+                                if stderr_buffer.len() >= 3 {
+                                    stderr_buffer.remove(0);
+                                }
+                                stderr_buffer.push(line_str);
+                            }
+                            CommandEvent::Terminated(term_payload) => {
+                                if !status_emitted {
+                                    let mut msg = match term_payload.code {
+                                        Some(code) => format!("进程意外终止，退出码: {}", code),
+                                        None => "进程意外终止".to_string(),
+                                    };
+                                    if !stderr_buffer.is_empty() {
+                                        msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
+                                    }
+                                    let payload = ProgressPayload {
+                                        r#type: "progress".to_string(),
+                                        task_id: task_id.clone(),
+                                        status: "error".to_string(),
+                                        message: msg,
+                                        current_page: 0,
+                                        total_pages: 0,
+                                        output_path: None,
+                                    };
+                                    let _ = app.emit("ocr-progress", payload);
+                                    status_emitted = true;
+                                }
+                                break;
+                            }
+                            _ => {}
                         }
+                    }
+                    _ = &mut abort_rx => {
+                        // 收到取消信号
+                        let _ = child.kill();
+                        
+                        let payload = ProgressPayload {
+                            r#type: "progress".to_string(),
+                            task_id: task_id.clone(),
+                            status: "error".to_string(),
+                            message: "用户已中止清理".to_string(),
+                            current_page: 0,
+                            total_pages: 0,
+                            output_path: None,
+                        };
+                        let _ = app.emit("ocr-progress", payload);
+                        status_emitted = true;
                         break;
                     }
-                };
-
-                let event = match event_opt {
-                    Some(ev) => ev,
-                    None => break,
-                };
-
-                match event {
-                    CommandEvent::Stdout(line) => {
-                        let line_str = String::from_utf8_lossy(&line);
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                            let type_str = val["type"].as_str().unwrap_or("");
-                            let status = match type_str {
-                                "progress" => "processing",
-                                "completed" => {
-                                    status_emitted = true;
-                                    "completed"
-                                }
-                                _ => {
-                                    status_emitted = true;
-                                    "error"
-                                }
-                            };
-                            
-                            let payload = ProgressPayload {
-                                r#type: "progress".to_string(),
-                                task_id: task_id.clone(),
-                                status: status.to_string(),
-                                message: val["message"].as_str().unwrap_or("").to_string(),
-                                current_page: val["current_page"].as_u64().unwrap_or(0) as usize,
-                                total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
-                                output_path: val["output_path"].as_str().map(|s| s.to_string()),
-                            };
-                            let _ = app.emit("ocr-progress", payload);
-                        }
-                    }
-                    CommandEvent::Stderr(line) => {
-                        let line_str = String::from_utf8_lossy(&line).trim_end().to_string();
-                        eprintln!("[Sidecar Stderr] {}", line_str);
-                        if stderr_buffer.len() >= 3 {
-                            stderr_buffer.remove(0);
-                        }
-                        stderr_buffer.push(line_str);
-                    }
-                    CommandEvent::Terminated(term_payload) => {
-                        if !status_emitted {
-                            let mut msg = match term_payload.code {
-                                Some(code) => format!("进程意外终止，退出码: {}", code),
-                                None => "进程意外终止".to_string(),
-                            };
-                            if !stderr_buffer.is_empty() {
-                                msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
-                            }
-                            let payload = ProgressPayload {
-                                r#type: "progress".to_string(),
-                                task_id: task_id.clone(),
-                                status: "error".to_string(),
-                                message: msg,
-                                current_page: 0,
-                                total_pages: 0,
-                                output_path: None,
-                            };
-                            let _ = app.emit("ocr-progress", payload);
-                            status_emitted = true;
-                        }
-                        break;
-                    }
-                    _ => {}
                 }
             }
+            cleanup();
+
             if !status_emitted {
                 let mut msg = "进程意外终止".to_string();
                 if !stderr_buffer.is_empty() {
@@ -533,9 +614,20 @@ async fn process_task(
     Ok(())
 }
 
+#[tauri::command]
+async fn abort_task(task_id: String, app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut active_tasks = state.active_tasks.lock().map_err(|e| e.to_string())?;
+    if let Some(abort_tx) = active_tasks.remove(&task_id) {
+        let _ = abort_tx.send(());
+    }
+    Ok(())
+}
+
 pub fn run() {
     let state = AppState {
         semaphore: Arc::new(Semaphore::new(2)), // Limit to max 2 concurrent OCR tasks
+        active_tasks: Mutex::new(HashMap::new()),
     };
 
     tauri::Builder::default()
@@ -545,7 +637,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![scan_files, process_task])
+        .invoke_handler(tauri::generate_handler![scan_files, process_task, abort_task])
         .setup(|app| {
             // 获取主窗口
             let main_window = app.get_webview_window("main").unwrap();
