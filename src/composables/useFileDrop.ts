@@ -30,11 +30,12 @@ export function useFileDrop() {
 
   async function setupTauriDropListeners(onFilesDropped: (paths: string[]) => void) {
     try {
-      const uDrop = await listen('tauri://file-drop', (event: any) => {
+      const uDrop = await listen('tauri://drag-drop', (event: any) => {
         isDragging.value = false;
         dragCounter = 0;
 
-        const droppedPaths = event.payload as string[];
+        const payload = event.payload as { paths: string[] } | null;
+        const droppedPaths = payload?.paths;
         if (droppedPaths && droppedPaths.length > 0) {
           const pdfPaths = droppedPaths.filter(p => p.toLowerCase().endsWith('.pdf'));
           if (pdfPaths.length > 0) {
@@ -48,7 +49,7 @@ export function useFileDrop() {
         unlistenDrop = uDrop;
       }
 
-      const uHover = await listen('tauri://file-drop-hover', () => {
+      const uHover = await listen('tauri://drag-over', () => {
         isDragging.value = true;
       });
       if (!isMounted) {
@@ -57,7 +58,7 @@ export function useFileDrop() {
         unlistenHover = uHover;
       }
 
-      const uCancel = await listen('tauri://file-drop-cancelled', () => {
+      const uCancel = await listen('tauri://drag-leave', () => {
         isDragging.value = false;
         dragCounter = 0;
       });
