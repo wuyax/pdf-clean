@@ -10,8 +10,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "dev:all": "node scripts/dev.js"
+    "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
