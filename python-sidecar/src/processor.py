@@ -177,8 +177,8 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
                 
                 # 1. 【高分辨率背景图】 (300 DPI)
                 # 这张图作为最终输出 PDF 的可见底层。300 DPI 是清晰度与体积的最佳平衡点。
-                # 【极其重要】：alpha=False 强制丢弃透明通道。
-                pix_bg = page_src.get_pixmap(dpi=dpi, alpha=False)
+                # 【极其重要】：alpha=False 强制丢弃透明通道。强制 colorspace=fitz.csRGB 确保灰度图也是 3 通道。
+                pix_bg = page_src.get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
                 
                 # 使用 PIL 进行高级 JPEG 压缩 (TinyJPG 风格)
                 img_pil = Image.frombytes("RGB", [pix_bg.width, pix_bg.height], pix_bg.samples)
@@ -197,7 +197,8 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
                 # 采用 100 DPI 极大减小了交给 PaddleOCR 处理的图像尺寸，这是解决 20GB 内存溢出导致程序崩溃的秘诀！
                 # 【极其重要】：必须设置 alpha=False。如果源 PDF 含有 Alpha 通道，
                 # 下方的 reshape(h, w, 3) 强转会直接把 4 通道的 RGBA 数据搓烂，导致图像扭曲斜边撕裂，OCR 坐标全部错位。
-                pix_ocr = page_src.get_pixmap(dpi=100, alpha=False)
+                # 强制 colorspace=fitz.csRGB 确保灰度图也是 3 通道。
+                pix_ocr = page_src.get_pixmap(dpi=100, colorspace=fitz.csRGB, alpha=False)
                 
                 # 从内存字节流构建 numpy 矩阵，并将 RGB 转换为 BGR 给 PaddleOCR 使用
                 img_np = np.frombuffer(pix_ocr.samples, dtype=np.uint8).reshape(pix_ocr.height, pix_ocr.width, 3).copy()
