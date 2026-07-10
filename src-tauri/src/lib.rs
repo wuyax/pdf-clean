@@ -45,6 +45,7 @@ async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Va
            .env("MODEL_DIR", &ocr_models_str)
            .stdout(std::process::Stdio::piped())
            .stderr(std::process::Stdio::inherit());
+        cmd.kill_on_drop(true);
 
         #[cfg(target_os = "windows")]
         {
@@ -202,6 +203,7 @@ async fn process_task(
                .env("MODEL_DIR", &ocr_models_str)
                .stdout(std::process::Stdio::piped())
                .stderr(std::process::Stdio::piped());
+            cmd.kill_on_drop(true);
 
             #[cfg(target_os = "windows")]
             {
@@ -460,6 +462,8 @@ async fn process_task(
                 }
             };
 
+            let mut child_opt = Some(child);
+
             let mut status_emitted = false;
             let mut rx = rx;
             let mut stderr_buffer = Vec::<String>::new();
@@ -578,7 +582,9 @@ async fn process_task(
                     }
                     _ = &mut abort_rx => {
                         // 收到取消信号
-                        let _ = child.kill();
+                        if let Some(c) = child_opt.take() {
+                            let _ = c.kill();
+                        }
                         
                         let payload = ProgressPayload {
                             r#type: "progress".to_string(),
@@ -613,7 +619,9 @@ async fn process_task(
                 };
                 let _ = app.emit("ocr-progress", payload);
             }
-            let _ = child.kill();
+            if let Some(c) = child_opt.take() {
+                let _ = c.kill();
+            }
         });
     }
 
