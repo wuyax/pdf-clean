@@ -67,8 +67,8 @@ def test_process_pdf_custom_dpi_quality(mock_get_ocr, mock_fitz, tmp_path):
     input_pdf.write_text('dummy')
     output_pdf = tmp_path / 'output.pdf'
     process_pdf(str(input_pdf), str(output_pdf), dpi=150, quality=75)
-    mock_page.get_pixmap.assert_any_call(dpi=150, alpha=False)
-    mock_page.get_pixmap.assert_any_call(dpi=100, alpha=False)
+    mock_page.get_pixmap.assert_any_call(dpi=150, colorspace=mock_fitz.csRGB, alpha=False)
+    mock_page.get_pixmap.assert_any_call(dpi=100, colorspace=mock_fitz.csRGB, alpha=False)
 
 @patch('src.processor.fitz')
 @patch('src.processor.get_ocr')

@@ -51,8 +51,9 @@ def _classify_page(doc, page_idx: int) -> str:
     if is_suspiciously_sliced or is_image_heavy:
         ocr = get_ocr_for_scan()
         if ocr:
-            # Low-DPI scan for speed
-            pix = page.get_pixmap(dpi=72, alpha=False)
+            # Low-DPI scan for speed. 强制 colorspace=fitz.csRGB 确保灰度图也是 3 通道。
+            import fitz
+            pix = page.get_pixmap(dpi=72, colorspace=fitz.csRGB, alpha=False)
             img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3).copy()
             img_np = img_np[:, :, ::-1] 
             
