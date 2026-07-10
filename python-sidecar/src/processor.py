@@ -153,13 +153,16 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
 
     print(f"Dual-Res Processing: {input_path}")
     
-    doc_src = fitz.open(input_path)
-    if doc_src.is_encrypted:
-        raise ValueError("该 PDF 文件受密码保护或已被加密，请解密后重试。")
-    total_pages = len(doc_src)
-    doc_out = fitz.open()
+    doc_src = None
+    doc_out = None
     
     try:
+        doc_src = fitz.open(input_path)
+        if doc_src.is_encrypted:
+            raise ValueError("该 PDF 文件受密码保护或已被加密，请解密后重试。")
+        total_pages = len(doc_src)
+        doc_out = fitz.open()
+        
         for page_num in range(total_pages):
             current_page_display = page_num + 1
             print(f"--- Page {current_page_display}/{total_pages} ---")
@@ -290,8 +293,10 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
         
     finally:
         # 确保在使用完毕后，无论是否抛出异常都安全关闭文档句柄
-        doc_src.close()
-        doc_out.close()
+        if doc_src is not None:
+            doc_src.close()
+        if doc_out is not None:
+            doc_out.close()
         gc.collect()
         
     return output_path
