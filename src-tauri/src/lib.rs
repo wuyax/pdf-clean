@@ -151,7 +151,11 @@ async fn process_task(
     app: AppHandle,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let permit = state.semaphore.clone().acquire_owned().await.map_err(|e| e.to_string())?;
+    let semaphore = state.semaphore.clone();
+    let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
+    if let Ok(mut tasks) = state.active_tasks.lock() {
+        tasks.insert(task_id.clone(), abort_tx);
+    }
 
     let args = vec![
         "process".to_string(),
@@ -172,6 +176,45 @@ async fn process_task(
     #[cfg(debug_assertions)]
     {
         tauri::async_runtime::spawn(async move {
+            let permit = tokio::select! {
+                res = semaphore.acquire_owned() => {
+                    match res {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let payload = ProgressPayload {
+                                r#type: "progress".to_string(),
+                                task_id: task_id.clone(),
+                                status: "error".to_string(),
+                                message: format!("获取并发信号量失败: {}", e),
+                                current_page: 0,
+                                total_pages: 0,
+                                output_path: None,
+                            };
+                            let _ = app.emit("ocr-progress", payload);
+                            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                                tasks.remove(&task_id);
+                            }
+                            return;
+                        }
+                    }
+                }
+                _ = &mut abort_rx => {
+                    let payload = ProgressPayload {
+                        r#type: "progress".to_string(),
+                        task_id: task_id.clone(),
+                        status: "error".to_string(),
+                        message: "用户已中止清理".to_string(),
+                        current_page: 0,
+                        total_pages: 0,
+                        output_path: None,
+                    };
+                    let _ = app.emit("ocr-progress", payload);
+                    if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                        tasks.remove(&task_id);
+                    }
+                    return;
+                }
+            };
             let _permit_holder = permit;
             let ocr_models_dir = match app.path().resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource) {
                 Ok(dir) => dir,
@@ -258,11 +301,7 @@ async fn process_task(
             };
             let _stderr_handle = tauri::async_runtime::spawn(stderr_task);
 
-            // 每次任务开始时，在 active_tasks 中注册
-            let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
-            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-                tasks.insert(task_id.clone(), abort_tx);
-            }
+            // Note: abort channel registration moved to process_task entry point
             
             // 在退出/完成后清理
             let cleanup_task_id = task_id.clone();
@@ -397,6 +436,45 @@ async fn process_task(
     #[cfg(not(debug_assertions))]
     {
         tauri::async_runtime::spawn(async move {
+            let permit = tokio::select! {
+                res = semaphore.acquire_owned() => {
+                    match res {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let payload = ProgressPayload {
+                                r#type: "progress".to_string(),
+                                task_id: task_id.clone(),
+                                status: "error".to_string(),
+                                message: format!("获取并发信号量失败: {}", e),
+                                current_page: 0,
+                                total_pages: 0,
+                                output_path: None,
+                            };
+                            let _ = app.emit("ocr-progress", payload);
+                            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                                tasks.remove(&task_id);
+                            }
+                            return;
+                        }
+                    }
+                }
+                _ = &mut abort_rx => {
+                    let payload = ProgressPayload {
+                        r#type: "progress".to_string(),
+                        task_id: task_id.clone(),
+                        status: "error".to_string(),
+                        message: "用户已中止清理".to_string(),
+                        current_page: 0,
+                        total_pages: 0,
+                        output_path: None,
+                    };
+                    let _ = app.emit("ocr-progress", payload);
+                    if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
+                        tasks.remove(&task_id);
+                    }
+                    return;
+                }
+            };
             let _permit_holder = permit;
             use tauri_plugin_shell::ShellExt;
             use tauri_plugin_shell::process::CommandEvent;
@@ -468,11 +546,7 @@ async fn process_task(
             let mut rx = rx;
             let mut stderr_buffer = Vec::<String>::new();
 
-            // 每次任务开始时，在 active_tasks 中注册
-            let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
-            if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-                tasks.insert(task_id.clone(), abort_tx);
-            }
+            // Note: abort channel registration moved to process_task entry point
             
             // 在退出/完成后清理
             let cleanup_task_id = task_id.clone();
