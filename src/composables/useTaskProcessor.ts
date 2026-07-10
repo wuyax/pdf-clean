@@ -161,9 +161,27 @@ export function useTaskProcessor(
     isGlobalProcessing.value = true;
     error.value = '';
 
+    const concurrencyLimit = 2;
+    const executing: Promise<void>[] = [];
+
     for (const task of pendingTasks) {
-      await processSingleTask(task);
+      const p = processSingleTask(task).then(() => {
+        // Remove promise from execution pool when completed
+        const index = executing.indexOf(p);
+        if (index > -1) {
+          executing.splice(index, 1);
+        }
+      });
+      executing.push(p);
+
+      // If we reached the concurrency limit, wait for at least one task to finish
+      if (executing.length >= concurrencyLimit) {
+        await Promise.race(executing);
+      }
     }
+
+    // Wait for all remaining active tasks to finish
+    await Promise.all(executing);
 
     isGlobalProcessing.value = false;
   }
