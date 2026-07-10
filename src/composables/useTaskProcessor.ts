@@ -1,4 +1,4 @@
-import { ref, computed, Ref } from 'vue';
+import { ref, computed, Ref, onUnmounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { Task, SaveMode, ConflictPolicy } from '../types/task';
@@ -14,6 +14,38 @@ export function useTaskProcessor(
   const isGlobalProcessing = ref(false);
   const error = ref('');
   const filterStatus = ref<string[]>([]);
+
+  // Registry to match taskId to its promise resolver function
+  const taskResolvers = new Map<string, (val: boolean) => void>();
+
+  // Register single global listener for progress updates
+  let unlistenFn: (() => void) | null = null;
+  const unlistenPromise = listen('ocr-progress', (event: any) => {
+    const data = event.payload;
+    const task = tasks.value.find(t => t.task_id === data.task_id);
+    if (!task) return;
+
+    task.status = data.status;
+    task.message = data.message;
+    task.current_page = data.current_page;
+    task.total_pages = data.total_pages;
+
+    if (data.status === 'completed' || data.status === 'error') {
+      const resolve = taskResolvers.get(data.task_id);
+      if (resolve) {
+        resolve(data.status === 'completed');
+        taskResolvers.delete(data.task_id);
+      }
+    }
+  });
+
+  unlistenPromise.then(fn => {
+    unlistenFn = fn;
+  });
+
+  onUnmounted(() => {
+    if (unlistenFn) unlistenFn();
+  });
 
   const filteredTasks = computed(() => {
     if (filterStatus.value.length === 0) return tasks.value;
@@ -161,39 +193,22 @@ export function useTaskProcessor(
       const taskId = crypto.randomUUID();
       task.task_id = taskId;
 
-      await new Promise<boolean>(async (resolve) => {
-        let unlisten: (() => void) | null = null;
-        
-        unlisten = await listen('ocr-progress', (event: any) => {
-          const data = event.payload;
-          if (data.task_id !== taskId) return;
+      await new Promise<boolean>((resolve) => {
+        taskResolvers.set(taskId, resolve);
 
-          task.status = data.status;
-          task.message = data.message;
-          task.current_page = data.current_page;
-          task.total_pages = data.total_pages;
-
-          if (data.status === 'completed' || data.status === 'error') {
-            if (unlisten) unlisten();
-            resolve(data.status === 'completed');
-          }
-        });
-
-        try {
-          await processTaskApi({
-            input_path: task.path,
-            output_dir: outputDir,
-            conflict_policy: conflictPolicy.value,
-            task_id: taskId,
-            dpi: resolvedQuality.value.dpi,
-            quality: resolvedQuality.value.quality
-          });
-        } catch (err: any) {
+        processTaskApi({
+          input_path: task.path,
+          output_dir: outputDir,
+          conflict_policy: conflictPolicy.value,
+          task_id: taskId,
+          dpi: resolvedQuality.value.dpi,
+          quality: resolvedQuality.value.quality
+        }).catch((err: any) => {
           task.status = 'error';
           task.message = '启动失败: ' + err.message;
-          if (unlisten) unlisten();
+          taskResolvers.delete(taskId);
           resolve(false);
-        }
+        });
       });
     } catch (err: any) {
       task.status = 'error';
