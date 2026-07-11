@@ -8,6 +8,7 @@ pub struct AppState {
     pub semaphore: Arc<Semaphore>,
     pub active_tasks: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     pub config: crate::config::AppConfig,
+    pub daemon: tokio::sync::Mutex<Option<(crate::sidecar::SidecarSession, tokio::sync::mpsc::Receiver<crate::sidecar::SidecarOutputEvent>)>>,
 }
 
 pub struct TaskCleanupGuard {

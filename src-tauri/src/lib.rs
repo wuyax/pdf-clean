@@ -11,12 +11,12 @@ use state::AppState;
 
 pub fn run() {
     let config = config::AppConfig::load();
-    let limit = config.ocr_concurrency_limit;
 
     let state = AppState {
-        semaphore: Arc::new(Semaphore::new(limit)),
+        semaphore: Arc::new(Semaphore::new(1)), // Force queuing by limit 1
         active_tasks: Mutex::new(HashMap::new()),
         config,
+        daemon: tokio::sync::Mutex::new(None),
     };
 
     tauri::Builder::default()

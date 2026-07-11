@@ -30,7 +30,7 @@ impl AppConfig {
         let ocr_concurrency_limit = env::var("OCR_CONCURRENCY_LIMIT")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(2);
+            .unwrap_or(1);
 
         let scan_timeout_secs = env::var("SCAN_TIMEOUT_SECS")
             .ok()
