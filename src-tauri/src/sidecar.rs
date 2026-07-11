@@ -9,7 +9,7 @@ pub enum SidecarOutputEvent {
 
 pub enum SidecarStdinWriter {
     Debug(tokio::process::ChildStdin),
-    Production(tauri_plugin_shell::process::CommandChild),
+    Production(Option<tauri_plugin_shell::process::CommandChild>),
 }
 
 pub struct SidecarSession {
@@ -21,6 +21,11 @@ impl SidecarSession {
     pub fn kill(&mut self) {
         if let Some(tx) = self.kill_tx.take() {
             let _ = tx.send(());
+        }
+        if let SidecarStdinWriter::Production(child_opt) = &mut self.stdin_writer {
+            if let Some(child) = child_opt.take() {
+                let _ = child.kill();
+            }
         }
     }
 
@@ -37,9 +42,13 @@ impl SidecarSession {
                 stdin.flush().await
                     .map_err(|e| format!("Failed to flush debug stdin: {}", e))?;
             }
-            SidecarStdinWriter::Production(child) => {
-                child.write(data.as_bytes())
-                    .map_err(|e| format!("Failed to write to production stdin: {}", e))?;
+            SidecarStdinWriter::Production(child_opt) => {
+                if let Some(child) = child_opt {
+                    child.write(data.as_bytes())
+                        .map_err(|e| format!("Failed to write to production stdin: {}", e))?;
+                } else {
+                    return Err("Child process was already terminated".to_string());
+                }
             }
         }
         Ok(())
@@ -53,9 +62,6 @@ pub fn spawn_sidecar(
     let (tx, rx) = tokio::sync::mpsc::channel::<SidecarOutputEvent>(100);
     let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
 
-    let state = app.try_state::<crate::state::AppState>().ok_or("AppState not registered")?;
-    let config = &state.config;
-
     let ocr_models_dir = app.path()
         .resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource)
         .map_err(|e| e.to_string())?;
@@ -63,6 +69,8 @@ pub fn spawn_sidecar(
 
     #[cfg(debug_assertions)]
     let stdin_writer = {
+        let state = app.try_state::<crate::state::AppState>().ok_or("AppState not registered")?;
+        let config = &state.config;
         let python_bin = &config.python_interpreter_path;
         let script_path = &config.python_script_path;
         let mut cmd = tokio::process::Command::new(python_bin);
@@ -138,42 +146,31 @@ pub fn spawn_sidecar(
             .spawn()
             .map_err(|e| e.to_string())?;
 
-        let mut child_opt = Some(child.clone());
         let tx_clone = tx.clone();
         
         tauri::async_runtime::spawn(async move {
-            tokio::select! {
-                _ = kill_rx => {
-                    if let Some(c) = child_opt.take() {
-                        let _ = c.kill();
+            while let Some(event) = rx_events.recv().await {
+                match event {
+                    CommandEvent::Stdout(line) => {
+                        let line_str = String::from_utf8_lossy(&line).into_owned();
+                        let _ = tx_clone.send(SidecarOutputEvent::Stdout(line_str)).await;
                     }
+                    CommandEvent::Stderr(line) => {
+                        let line_str = String::from_utf8_lossy(&line).trim_end().to_string();
+                        let _ = tx_clone.send(SidecarOutputEvent::Stderr(line_str)).await;
+                    }
+                    CommandEvent::Terminated(term_payload) => {
+                        let _ = tx_clone.send(SidecarOutputEvent::Terminated(term_payload.code)).await;
+                        break;
+                    }
+                    _ => {}
                 }
-                _ = async {
-                    while let Some(event) = rx_events.recv().await {
-                        match event {
-                            CommandEvent::Stdout(line) => {
-                                let line_str = String::from_utf8_lossy(&line).into_owned();
-                                let _ = tx_clone.send(SidecarOutputEvent::Stdout(line_str)).await;
-                            }
-                            CommandEvent::Stderr(line) => {
-                                let line_str = String::from_utf8_lossy(&line).trim_end().to_string();
-                                let _ = tx_clone.send(SidecarOutputEvent::Stderr(line_str)).await;
-                            }
-                            CommandEvent::Terminated(term_payload) => {
-                                let _ = tx_clone.send(SidecarOutputEvent::Terminated(term_payload.code)).await;
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                } => {}
-            }
-            if let Some(c) = child_opt.take() {
-                let _ = c.kill();
             }
         });
 
-        SidecarStdinWriter::Production(child)
+        let _ = kill_rx;
+
+        SidecarStdinWriter::Production(Some(child))
     };
 
     Ok((SidecarSession { kill_tx: Some(kill_tx), stdin_writer }, rx))
