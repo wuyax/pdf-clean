@@ -35,12 +35,12 @@ impl AppConfig {
         let scan_timeout_secs = env::var("SCAN_TIMEOUT_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+            .unwrap_or(180);
 
         let process_timeout_secs = env::var("PROCESS_TIMEOUT_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(60);
+            .unwrap_or(300);
 
         let python_interpreter_path = env::var("PYTHON_INTERPRETER_PATH")
             .unwrap_or_else(|_| {

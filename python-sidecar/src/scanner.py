@@ -3,19 +3,6 @@ import fitz
 import re
 import os
 import numpy as np
-from difflib import SequenceMatcher
-
-def get_ocr_for_scan():
-    try:
-        try:
-            from processor import get_ocr
-        except ImportError:
-            from src.processor import get_ocr
-        return get_ocr()
-    except Exception as e:
-        import sys
-        print(f"Error importing/getting OCR: {e}", file=sys.stderr)
-        return None
 
 def _classify_page(doc, page_idx: int) -> str:
     page = doc[page_idx]
@@ -48,53 +35,18 @@ def _classify_page(doc, page_idx: int) -> str:
     if num_images < 15 and img_coverage < 0.3:
         return "TYPE_1"
 
-    # --- 3. Deep Verification (OCR Sampling) ---
+    # --- 3. Fast Layout Heuristics ---
     # Triggered if image count is high (Slicing behavior) or coverage is high
     is_suspiciously_sliced = num_images > 25
-    is_image_heavy = img_coverage > 0.4
+    is_image_heavy = img_coverage > 0.85
     
-    if is_suspiciously_sliced or is_image_heavy:
-        ocr = get_ocr_for_scan()
-        if ocr:
-            # Low-DPI scan for speed. 强制 colorspace=fitz.csRGB 确保灰度图也是 3 通道。
-            import fitz
-            pix = page.get_pixmap(dpi=72, colorspace=fitz.csRGB, alpha=False)
-            img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3).copy()
-            img_np = img_np[:, :, ::-1] 
-            
-            ocr_res = ocr(img_np)
-            if ocr_res is not None:
-                results, elapse = ocr_res
-                text_blocks = []
-                if results:
-                    for line in results:
-                        if isinstance(line, (list, tuple)) and len(line) > 1 and line[1]:
-                            text_blocks.append(str(line[1]))
-                ocr_text = "".join(text_blocks)
-                ocr_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', ocr_text)
-                pdf_clean = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
-                
-                if len(ocr_clean) > 5:
-                    len_ratio = len(pdf_clean) / len(ocr_clean)
-                    sim_ratio = SequenceMatcher(None, ocr_clean, pdf_clean).ratio()
-                    
-                    # LOGIC:
-                    # If it's a decoy:
-                    # - Many images (Slicing) AND (Low similarity OR extreme length mismatch)
-                    if is_suspiciously_sliced and (sim_ratio < 0.3 or len_ratio < 0.4):
-                        return "TYPE_2"
-                    
-                    # If similarity is very low even without slicing (normal scanned decoy)
-                    if sim_ratio < 0.2 or len_ratio < 0.2:
-                        return "TYPE_2"
-                        
-                    # If similarity is high, it's valid (Normal text or good OCR)
-                    if sim_ratio > 0.7:
-                        return "TYPE_3"
-                elif len(pdf_clean) > 20:
-                    # OCR detected almost nothing (<= 5 chars) but the PDF text layer has significant text (> 20 chars).
-                    # This indicates hidden/decoy text on an image.
-                    return "TYPE_2"
+    if is_suspiciously_sliced:
+        # Sliced images with existing text strongly indicate a decoy/hidden text PDF.
+        return "TYPE_2"
+        
+    if is_image_heavy:
+        # A full-page background image with an existing text layer indicates a scanned PDF that has already been OCRed.
+        return "TYPE_3"
 
     # Default to TYPE_1 for all other natural/mixed documents
     return "TYPE_1"

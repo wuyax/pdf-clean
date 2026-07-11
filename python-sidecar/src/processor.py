@@ -50,7 +50,9 @@ def get_ocr():
         ocr_instance = RapidOCR(
             det_model_path=os.path.join(model_dir, "det.onnx"),
             rec_model_path=os.path.join(model_dir, "rec.onnx"),
-            cls_model_path=os.path.join(model_dir, "cls.onnx")
+            cls_model_path=os.path.join(model_dir, "cls.onnx"),
+            intra_op_num_threads=1,
+            inter_op_num_threads=1
         )
         return ocr_instance
     except Exception as e:
