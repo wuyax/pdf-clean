@@ -14,12 +14,35 @@ pub struct ProgressPayload {
     pub output_path: Option<String>,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum CommandError {
+    #[error("Sidecar execution failed: {0}")]
+    SidecarError(String),
+    #[error("Operation timeout: {0}")]
+    Timeout(String),
+    #[error("Lock acquisition failed: {0}")]
+    LockError(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+// Enable Tauri commands to serialize this error to String for the frontend
+impl serde::Serialize for CommandError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 #[tauri::command]
-pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Value, CommandError> {
     let mut args = vec!["scan".to_string()];
     args.extend(paths);
 
-    let (mut session, mut rx) = spawn_sidecar(&app, args)?;
+    let (mut session, mut rx) = spawn_sidecar(&app, args)
+        .map_err(|e| CommandError::SidecarError(e))?;
     let run_fut = async {
         let mut results = None;
         while let Some(event) = rx.recv().await {
@@ -43,11 +66,11 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
         Ok(res) => res,
         Err(_) => {
             session.kill();
-            return Err("Scan timeout after 30 seconds".to_string());
+            return Err(CommandError::Timeout("Scan timeout after 30 seconds".to_string()));
         }
     };
     session.kill();
-    results.ok_or_else(|| "Failed to get scan results".to_string())
+    results.ok_or_else(|| CommandError::Internal("Failed to get scan results".to_string()))
 }
 
 #[tauri::command]
@@ -59,11 +82,14 @@ pub async fn process_task(
     dpi: u32,
     quality: u8,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let state = app.state::<AppState>();
     let semaphore = state.semaphore.clone();
     let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
-    if let Ok(mut tasks) = state.active_tasks.lock() {
+    
+    {
+        let mut tasks = state.active_tasks.lock()
+            .map_err(|e| CommandError::LockError(e.to_string()))?;
         tasks.insert(task_id.clone(), abort_tx);
     }
 
@@ -86,6 +112,11 @@ pub async fn process_task(
     #[allow(clippy::redundant_clone)]
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        let _cleanup_guard = crate::state::TaskCleanupGuard {
+            app: app.clone(),
+            task_id: task_id.clone(),
+        };
+
         let permit = tokio::select! {
             res = semaphore.acquire_owned() => {
                 match res {
@@ -101,9 +132,6 @@ pub async fn process_task(
                             output_path: None,
                         };
                         let _ = app.emit("ocr-progress", payload);
-                        if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-                            tasks.remove(&task_id);
-                        }
                         return;
                     }
                 }
@@ -119,9 +147,6 @@ pub async fn process_task(
                     output_path: None,
                 };
                 let _ = app.emit("ocr-progress", payload);
-                if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-                    tasks.remove(&task_id);
-                }
                 return;
             }
         };
@@ -141,9 +166,6 @@ pub async fn process_task(
                     output_path: None,
                 };
                 let _ = app.emit("ocr-progress", payload);
-                if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-                    tasks.remove(&task_id);
-                }
                 return;
             }
         };
@@ -195,9 +217,15 @@ pub async fn process_task(
                                         status_emitted = true;
                                         "completed"
                                     }
-                                    _ => {
+                                    "error" => {
                                         status_emitted = true;
                                         "error"
+                                    }
+                                    _ => {
+                                        // Unknown JSON message type (e.g. debugging/info logs).
+                                        // Log it and continue reading instead of terminating.
+                                        eprintln!("[Sidecar Info JSON] {:?}", val);
+                                        continue; 
                                     }
                                 };
                                 
@@ -262,11 +290,6 @@ pub async fn process_task(
                 }
             }
         }
-        
-        // Clean up registry
-        if let Ok(mut tasks) = app.state::<AppState>().active_tasks.lock() {
-            tasks.remove(&task_id);
-        }
 
         if !status_emitted {
             let mut msg = "进程意外终止".to_string();
@@ -291,9 +314,10 @@ pub async fn process_task(
 }
 
 #[tauri::command]
-pub async fn abort_task(task_id: String, app: AppHandle) -> Result<(), String> {
+pub async fn abort_task(task_id: String, app: AppHandle) -> Result<(), CommandError> {
     let state = app.state::<AppState>();
-    let mut active_tasks = state.active_tasks.lock().map_err(|e| e.to_string())?;
+    let mut active_tasks = state.active_tasks.lock()
+        .map_err(|e| CommandError::LockError(e.to_string()))?;
     if let Some(abort_tx) = active_tasks.remove(&task_id) {
         let _ = abort_tx.send(());
     }
