@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;
-use crate::sidecar::{spawn_sidecar, SidecarOutputEvent};
+use crate::sidecar::SidecarOutputEvent;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProgressPayload {
@@ -39,68 +39,78 @@ impl serde::Serialize for CommandError {
     }
 }
 
+async fn get_or_start_daemon<'a>(
+    app: &tauri::AppHandle,
+    daemon_guard: &'a mut Option<(crate::sidecar::SidecarSession, tokio::sync::mpsc::Receiver<crate::sidecar::SidecarOutputEvent>)>,
+) -> Result<&'a mut (crate::sidecar::SidecarSession, tokio::sync::mpsc::Receiver<crate::sidecar::SidecarOutputEvent>), CommandError> {
+    if daemon_guard.is_none() {
+        let (session, rx) = crate::sidecar::spawn_sidecar(app, vec!["daemon".to_string()])
+            .map_err(|e| CommandError::SidecarError(format!("Failed to spawn daemon sidecar: {}", e)))?;
+        *daemon_guard = Some((session, rx));
+    }
+    Ok(daemon_guard.as_mut().unwrap())
+}
+
 #[tauri::command]
 pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Value, CommandError> {
-    let mut args = vec!["scan".to_string()];
-    args.extend(paths);
-
-    let (mut session, mut rx) = spawn_sidecar(&app, args)
-        .map_err(|e| CommandError::SidecarError(e))?;
-    let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let run_fut = {
-        let stderr_buffer = stderr_buffer.clone();
-        async move {
-            let mut results = None;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    SidecarOutputEvent::Stdout(line_str) => {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                            if val["type"] == "scan_result" {
-                                results = Some(val["results"].clone());
-                                break;
-                            }
-                        }
-                    }
-                    SidecarOutputEvent::Stderr(line_str) => {
-                        if let Ok(mut buf) = stderr_buffer.lock() {
-                            if buf.len() >= 5 {
-                                buf.remove(0);
-                            }
-                            buf.push(line_str);
-                        }
-                    }
-                    SidecarOutputEvent::Terminated(_) => {}
-                }
-            }
-            results
-        }
-    };
-
     let state = app.state::<AppState>();
     let scan_timeout = state.config.scan_timeout_secs;
 
-    let results = match tokio::time::timeout(std::time::Duration::from_secs(scan_timeout), run_fut).await {
-        Ok(res) => res,
+    let mut daemon_guard = state.daemon.lock().await;
+    get_or_start_daemon(&app, &mut *daemon_guard).await?;
+
+    let (mut session, mut rx) = daemon_guard.take().unwrap();
+
+    let req = serde_json::json!({
+        "action": "scan",
+        "paths": paths,
+    });
+    let req_str = serde_json::to_string(&req).map_err(|e| CommandError::Internal(e.to_string()))?;
+    
+    if let Err(e) = session.write_line(&req_str).await {
+        session.kill();
+        return Err(CommandError::SidecarError(format!("Failed to write to daemon: {}", e)));
+    }
+
+    let run_fut = async {
+        while let Some(event) = rx.recv().await {
+            match event {
+                SidecarOutputEvent::Stdout(line_str) => {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                        if val["type"] == "scan_result" {
+                            return Ok(val["results"].clone());
+                        }
+                    }
+                }
+                SidecarOutputEvent::Stderr(line_str) => {
+                    eprintln!("[Daemon Scan Stderr] {}", line_str);
+                }
+                SidecarOutputEvent::Terminated(_) => {
+                    return Err(CommandError::SidecarError("Daemon terminated during scan".to_string()));
+                }
+            }
+        }
+        Err(CommandError::SidecarError("Daemon connection closed".to_string()))
+    };
+
+    match tokio::time::timeout(std::time::Duration::from_secs(scan_timeout), run_fut).await {
+        Ok(res) => {
+            match res {
+                Ok(results) => {
+                    *daemon_guard = Some((session, rx));
+                    Ok(results)
+                }
+                Err(e) => {
+                    session.kill();
+                    Err(e)
+                }
+            }
+        }
         Err(_) => {
             session.kill();
-            return Err(CommandError::Timeout(format!("Scan timeout after {} seconds", scan_timeout)));
+            Err(CommandError::Timeout(format!("Scan timeout after {} seconds", scan_timeout)))
         }
-    };
-    session.kill();
-    
-    results.ok_or_else(|| {
-        let logs = if let Ok(buf) = stderr_buffer.lock() {
-            buf.join(" | ")
-        } else {
-            String::new()
-        };
-        let msg = if logs.is_empty() {
-            "Failed to get scan results".to_string()
-        } else {
-            format!("Failed to get scan results: {}", logs)
-        };
-        CommandError::Internal(msg)
-    })
+    }
 }
 
 #[tauri::command]
@@ -118,32 +128,16 @@ pub async fn process_task(
     let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
     
     {
-        let mut tasks = state.active_tasks.lock()
+        let mut active_tasks = state.active_tasks.lock()
             .map_err(|e| CommandError::LockError(e.to_string()))?;
-        tasks.insert(task_id.clone(), abort_tx);
+        active_tasks.insert(task_id.clone(), abort_tx);
     }
-
-    let args = vec![
-        "process".to_string(),
-        "--input".to_string(),
-        input_path,
-        "--output-dir".to_string(),
-        output_dir,
-        "--conflict".to_string(),
-        conflict_policy,
-        "--task-id".to_string(),
-        task_id.clone(),
-        "--dpi".to_string(),
-        dpi.to_string(),
-        "--quality".to_string(),
-        quality.to_string(),
-    ];
 
     #[allow(clippy::redundant_clone)]
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         let _cleanup_guard = crate::state::TaskCleanupGuard {
-            app: app.clone(),
+            app: app_clone.clone(),
             task_id: task_id.clone(),
         };
 
@@ -161,7 +155,7 @@ pub async fn process_task(
                             total_pages: 0,
                             output_path: None,
                         };
-                        let _ = app.emit("ocr-progress", payload);
+                        let _ = app_clone.emit("ocr-progress", payload);
                         return;
                     }
                 }
@@ -176,35 +170,80 @@ pub async fn process_task(
                     total_pages: 0,
                     output_path: None,
                 };
-                let _ = app.emit("ocr-progress", payload);
+                let _ = app_clone.emit("ocr-progress", payload);
                 return;
             }
         };
         let _permit_holder = permit;
 
-        // Use spawn_sidecar helper
-        let (mut session, mut rx) = match spawn_sidecar(&app_clone, args) {
-            Ok(val) => val,
+        let state = app_clone.state::<AppState>();
+        let mut daemon_guard = state.daemon.lock().await;
+        
+        let (mut session, mut rx) = match get_or_start_daemon(&app_clone, &mut *daemon_guard).await {
+            Ok(_) => daemon_guard.take().unwrap(),
             Err(e) => {
                 let payload = ProgressPayload {
                     r#type: "progress".to_string(),
                     task_id: task_id.clone(),
                     status: "error".to_string(),
-                    message: format!("启动 Sidecar 失败: {}", e),
+                    message: format!("启动守护进程失败: {}", e),
                     current_page: 0,
                     total_pages: 0,
                     output_path: None,
                 };
-                let _ = app.emit("ocr-progress", payload);
+                let _ = app_clone.emit("ocr-progress", payload);
                 return;
             }
         };
 
+        let req = serde_json::json!({
+            "action": "process",
+            "input_path": input_path,
+            "output_dir": output_dir,
+            "conflict": conflict_policy,
+            "task_id": task_id.clone(),
+            "dpi": dpi,
+            "quality": quality,
+        });
+        let req_str = match serde_json::to_string(&req) {
+            Ok(s) => s,
+            Err(e) => {
+                let payload = ProgressPayload {
+                    r#type: "progress".to_string(),
+                    task_id: task_id.clone(),
+                    status: "error".to_string(),
+                    message: format!("序列化请求失败: {}", e),
+                    current_page: 0,
+                    total_pages: 0,
+                    output_path: None,
+                };
+                let _ = app_clone.emit("ocr-progress", payload);
+                *daemon_guard = Some((session, rx));
+                return;
+            }
+        };
+
+        if let Err(e) = session.write_line(&req_str).await {
+            let payload = ProgressPayload {
+                r#type: "progress".to_string(),
+                task_id: task_id.clone(),
+                status: "error".to_string(),
+                message: format!("向守护进程写入失败: {}", e),
+                current_page: 0,
+                total_pages: 0,
+                output_path: None,
+            };
+            let _ = app_clone.emit("ocr-progress", payload);
+            session.kill();
+            return;
+        }
+
         let mut status_emitted = false;
         let mut stderr_buffer = Vec::<String>::new();
         let mut exit_code = None;
+        let mut put_back = false;
 
-        let process_timeout = app.state::<AppState>().config.process_timeout_secs;
+        let process_timeout = app_clone.state::<AppState>().config.process_timeout_secs;
 
         loop {
             let rx_recv_fut = tokio::time::timeout(std::time::Duration::from_secs(process_timeout), rx.recv());
@@ -228,9 +267,10 @@ pub async fn process_task(
                                     total_pages: 0,
                                     output_path: None,
                                 };
-                                let _ = app.emit("ocr-progress", payload);
+                                let _ = app_clone.emit("ocr-progress", payload);
                                 status_emitted = true;
                             }
+                            session.kill();
                             break;
                         }
                     };
@@ -248,15 +288,15 @@ pub async fn process_task(
                                     "progress" => "processing",
                                     "completed" => {
                                         status_emitted = true;
+                                        put_back = true;
                                         "completed"
                                     }
                                     "error" => {
                                         status_emitted = true;
+                                        put_back = true;
                                         "error"
                                     }
                                     _ => {
-                                        // Unknown JSON message type (e.g. debugging/info logs).
-                                        // Log it and continue reading instead of terminating.
                                         eprintln!("[Sidecar Info JSON] {:?}", val);
                                         continue; 
                                     }
@@ -271,7 +311,10 @@ pub async fn process_task(
                                     total_pages: val["total_pages"].as_u64().unwrap_or(0) as usize,
                                     output_path: val["output_path"].as_str().map(|s| s.to_string()),
                                 };
-                                let _ = app.emit("ocr-progress", payload);
+                                let _ = app_clone.emit("ocr-progress", payload);
+                                if status == "completed" || status == "error" {
+                                    break;
+                                }
                             }
                         }
                         SidecarOutputEvent::Stderr(line_str) => {
@@ -283,10 +326,14 @@ pub async fn process_task(
                         }
                         SidecarOutputEvent::Terminated(code) => {
                             exit_code = Some(code);
+                            break;
                         }
                     }
                 }
                 _ = &mut abort_rx => {
+                    if let Some((mut session, _)) = daemon_guard.take() {
+                        session.kill();
+                    }
                     session.kill();
                     let payload = ProgressPayload {
                         r#type: "progress".to_string(),
@@ -297,7 +344,7 @@ pub async fn process_task(
                         total_pages: 0,
                         output_path: None,
                     };
-                    let _ = app.emit("ocr-progress", payload);
+                    let _ = app_clone.emit("ocr-progress", payload);
                     status_emitted = true;
                     break;
                 }
@@ -321,9 +368,11 @@ pub async fn process_task(
                 total_pages: 0,
                 output_path: None,
             };
-            let _ = app.emit("ocr-progress", payload);
+            let _ = app_clone.emit("ocr-progress", payload);
+            session.kill();
+        } else if put_back {
+            *daemon_guard = Some((session, rx));
         }
-        session.kill();
     });
 
     Ok(())
