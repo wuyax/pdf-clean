@@ -2,6 +2,20 @@ import os
 import sys
 import json
 import contextlib
+import threading
+
+def monitor_parent_death():
+    try:
+        # sys.stdin.read() will block until the parent closes the pipe (on exit/crash)
+        sys.stdin.read()
+    except Exception:
+        pass
+    # Exit immediately on EOF
+    os._exit(0)
+
+# Start the parent monitor thread as a daemon thread
+t = threading.Thread(target=monitor_parent_death, daemon=True)
+t.start()
 # Ensure current and parent directories are in path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)

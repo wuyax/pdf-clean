@@ -43,6 +43,7 @@ pub fn spawn_sidecar(
         cmd.arg(script_path)
            .args(args)
            .env("MODEL_DIR", &ocr_models_str)
+           .stdin(std::process::Stdio::piped()) // Pipe stdin to monitor parent death
            .stdout(std::process::Stdio::piped())
            .stderr(std::process::Stdio::piped());
         cmd.kill_on_drop(true);
