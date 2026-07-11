@@ -42,7 +42,11 @@
           <span class="text-sm font-medium text-slate-700 truncate tracking-tight" :title="task.path">
             {{ task.name }}
           </span>
-          <span class="text-[10px] text-slate-400 truncate mt-0.5 tabular-nums">
+          <span 
+            @click="openFileLocation(task.path)"
+            class="text-[10px] text-slate-400 truncate mt-0.5 tabular-nums hover:text-blue-500 hover:underline cursor-pointer"
+            title="点击打开源文件位置"
+          >
             {{ task.path }}
           </span>
         </div>
@@ -109,9 +113,10 @@
         <!-- Per-row Action: Show Location & Remove -->
         <div class="w-20 flex justify-center items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
           <button 
-            @click="openFileLocation(task.path)"
+            v-if="task.status === 'completed' && task.outputPath"
+            @click="openFileLocation(task.outputPath)"
             class="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-all active:scale-90"
-            title="打开文件位置"
+            title="打开结果文件位置"
           >
             <FolderOpen class="w-4 h-4" />
           </button>

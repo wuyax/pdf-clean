@@ -29,6 +29,9 @@ export function useTaskProcessor(
     task.message = data.message;
     task.current_page = data.current_page;
     task.total_pages = data.total_pages;
+    if (data.output_path) {
+      task.outputPath = data.output_path;
+    }
 
     if (data.status === 'completed' || data.status === 'error') {
       const resolve = taskResolvers.get(data.task_id);

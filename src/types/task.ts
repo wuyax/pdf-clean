@@ -8,6 +8,7 @@ export interface Task {
   current_page: number;
   total_pages: number;
   task_id?: string;
+  outputPath?: string;
 }
 
 export type SaveMode = 'same-dir' | 'custom-dir';
