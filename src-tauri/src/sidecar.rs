@@ -7,8 +7,14 @@ pub enum SidecarOutputEvent {
     Terminated(Option<i32>),
 }
 
+pub enum SidecarStdinWriter {
+    Debug(tokio::process::ChildStdin),
+    Production(tauri_plugin_shell::process::CommandChild),
+}
+
 pub struct SidecarSession {
     pub kill_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    pub stdin_writer: SidecarStdinWriter,
 }
 
 impl SidecarSession {
@@ -16,6 +22,27 @@ impl SidecarSession {
         if let Some(tx) = self.kill_tx.take() {
             let _ = tx.send(());
         }
+    }
+
+    pub async fn write_line(&mut self, line: &str) -> Result<(), String> {
+        let mut data = line.to_string();
+        if !data.ends_with('\n') {
+            data.push('\n');
+        }
+        match &mut self.stdin_writer {
+            SidecarStdinWriter::Debug(stdin) => {
+                use tokio::io::AsyncWriteExt;
+                stdin.write_all(data.as_bytes()).await
+                    .map_err(|e| format!("Failed to write to debug stdin: {}", e))?;
+                stdin.flush().await
+                    .map_err(|e| format!("Failed to flush debug stdin: {}", e))?;
+            }
+            SidecarStdinWriter::Production(child) => {
+                child.write(data.as_bytes())
+                    .map_err(|e| format!("Failed to write to production stdin: {}", e))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -35,7 +62,7 @@ pub fn spawn_sidecar(
     let ocr_models_str = ocr_models_dir.to_string_lossy().to_string();
 
     #[cfg(debug_assertions)]
-    {
+    let stdin_writer = {
         let python_bin = &config.python_interpreter_path;
         let script_path = &config.python_script_path;
         let mut cmd = tokio::process::Command::new(python_bin);
@@ -56,7 +83,7 @@ pub fn spawn_sidecar(
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn python venv: {}", e))?;
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
         let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
-        let stdin = child.stdin.take();
+        let stdin = child.stdin.take().ok_or("Failed to open stdin")?;
 
         let tx_out = tx.clone();
         tauri::async_runtime::spawn(async move {
@@ -83,7 +110,6 @@ pub fn spawn_sidecar(
         });
 
         tauri::async_runtime::spawn(async move {
-            let _stdin_keeper = stdin;
             tokio::select! {
                 _ = kill_rx => {
                     let _ = child.kill().await;
@@ -95,10 +121,12 @@ pub fn spawn_sidecar(
                 }
             }
         });
-    }
+
+        SidecarStdinWriter::Debug(stdin)
+    };
 
     #[cfg(not(debug_assertions))]
-    {
+    let stdin_writer = {
         use tauri_plugin_shell::ShellExt;
         use tauri_plugin_shell::process::CommandEvent;
 
@@ -110,7 +138,7 @@ pub fn spawn_sidecar(
             .spawn()
             .map_err(|e| e.to_string())?;
 
-        let mut child_opt = Some(child);
+        let mut child_opt = Some(child.clone());
         let tx_clone = tx.clone();
         
         tauri::async_runtime::spawn(async move {
@@ -144,9 +172,11 @@ pub fn spawn_sidecar(
                 let _ = c.kill();
             }
         });
-    }
 
-    Ok((SidecarSession { kill_tx: Some(kill_tx) }, rx))
+        SidecarStdinWriter::Production(child)
+    };
+
+    Ok((SidecarSession { kill_tx: Some(kill_tx), stdin_writer }, rx))
 }
 
 #[cfg(test)]
