@@ -46,25 +46,37 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
 
     let (mut session, mut rx) = spawn_sidecar(&app, args)
         .map_err(|e| CommandError::SidecarError(e))?;
-    let run_fut = async {
-        let mut results = None;
-        while let Some(event) = rx.recv().await {
-            match event {
-                SidecarOutputEvent::Stdout(line_str) => {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        if val["type"] == "scan_result" {
-                            results = Some(val["results"].clone());
-                            break;
+    let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let run_fut = {
+        let stderr_buffer = stderr_buffer.clone();
+        async move {
+            let mut results = None;
+            while let Some(event) = rx.recv().await {
+                match event {
+                    SidecarOutputEvent::Stdout(line_str) => {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                            if val["type"] == "scan_result" {
+                                results = Some(val["results"].clone());
+                                break;
+                            }
                         }
                     }
+                    SidecarOutputEvent::Stderr(line_str) => {
+                        eprintln!("[Sidecar Scan Stderr] {}", line_str);
+                        if let Ok(mut buf) = stderr_buffer.lock() {
+                            if buf.len() >= 5 {
+                                buf.remove(0);
+                            }
+                            buf.push(line_str);
+                        }
+                    }
+                    SidecarOutputEvent::Terminated(_) => {
+                        // Do not break immediately. Let the stdout task finish reading any buffered output.
+                    }
                 }
-                SidecarOutputEvent::Terminated(_) => {
-                    // Do not break immediately. Let the stdout task finish reading any buffered output.
-                }
-                _ => {}
             }
+            results
         }
-        results
     };
 
     let state = app.state::<AppState>();
@@ -78,7 +90,20 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
         }
     };
     session.kill();
-    results.ok_or_else(|| CommandError::Internal("Failed to get scan results".to_string()))
+    
+    results.ok_or_else(|| {
+        let logs = if let Ok(buf) = stderr_buffer.lock() {
+            buf.join(" | ")
+        } else {
+            String::new()
+        };
+        let msg = if logs.is_empty() {
+            "Failed to get scan results".to_string()
+        } else {
+            format!("Failed to get scan results: {}", logs)
+        };
+        CommandError::Internal(msg)
+    })
 }
 
 #[tauri::command]
