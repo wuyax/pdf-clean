@@ -1,6 +1,7 @@
 pub mod state;
 pub mod sidecar;
 pub mod commands;
+pub mod config;
 
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -9,9 +10,13 @@ use tauri::{Manager, TitleBarStyle};
 use state::AppState;
 
 pub fn run() {
+    let config = config::AppConfig::load();
+    let limit = config.ocr_concurrency_limit;
+
     let state = AppState {
-        semaphore: Arc::new(Semaphore::new(2)), // Limit to max 2 concurrent OCR tasks
+        semaphore: Arc::new(Semaphore::new(limit)),
         active_tasks: Mutex::new(HashMap::new()),
+        config,
     };
 
     tauri::Builder::default()

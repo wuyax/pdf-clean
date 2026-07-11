@@ -62,11 +62,14 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
         results
     };
 
-    let results = match tokio::time::timeout(std::time::Duration::from_secs(30), run_fut).await {
+    let state = app.state::<AppState>();
+    let scan_timeout = state.config.scan_timeout_secs;
+
+    let results = match tokio::time::timeout(std::time::Duration::from_secs(scan_timeout), run_fut).await {
         Ok(res) => res,
         Err(_) => {
             session.kill();
-            return Err(CommandError::Timeout("Scan timeout after 30 seconds".to_string()));
+            return Err(CommandError::Timeout(format!("Scan timeout after {} seconds", scan_timeout)));
         }
     };
     session.kill();
@@ -173,8 +176,10 @@ pub async fn process_task(
         let mut status_emitted = false;
         let mut stderr_buffer = Vec::<String>::new();
 
+        let process_timeout = app.state::<AppState>().config.process_timeout_secs;
+
         loop {
-            let rx_recv_fut = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv());
+            let rx_recv_fut = tokio::time::timeout(std::time::Duration::from_secs(process_timeout), rx.recv());
             
             tokio::select! {
                 event_res = rx_recv_fut => {
@@ -182,7 +187,7 @@ pub async fn process_task(
                         Ok(opt) => opt,
                         Err(_) => {
                             if !status_emitted {
-                                let mut msg = "OCR 进程超时或未响应(60秒)".to_string();
+                                let mut msg = format!("OCR 进程超时或未响应({}秒)", process_timeout);
                                 if !stderr_buffer.is_empty() {
                                     msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
                                 }

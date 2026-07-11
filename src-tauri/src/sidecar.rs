@@ -26,6 +26,9 @@ pub fn spawn_sidecar(
     let (tx, rx) = tokio::sync::mpsc::channel::<SidecarOutputEvent>(100);
     let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
 
+    let state = app.try_state::<crate::state::AppState>().ok_or("AppState not registered")?;
+    let config = &state.config;
+
     let ocr_models_dir = app.path()
         .resolve("resources/ocr_models", tauri::path::BaseDirectory::Resource)
         .map_err(|e| e.to_string())?;
@@ -33,12 +36,8 @@ pub fn spawn_sidecar(
 
     #[cfg(debug_assertions)]
     {
-        let python_bin = if cfg!(target_os = "windows") {
-            "../python-sidecar/venv/Scripts/python.exe"
-        } else {
-            "../python-sidecar/venv/bin/python"
-        };
-        let script_path = "../python-sidecar/src/main.py";
+        let python_bin = &config.python_interpreter_path;
+        let script_path = &config.python_script_path;
         let mut cmd = tokio::process::Command::new(python_bin);
         cmd.arg(script_path)
            .args(args)

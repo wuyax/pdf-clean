@@ -7,6 +7,7 @@ use tauri::Manager;
 pub struct AppState {
     pub semaphore: Arc<Semaphore>,
     pub active_tasks: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    pub config: crate::config::AppConfig,
 }
 
 pub struct TaskCleanupGuard {
