@@ -26,13 +26,16 @@ pub enum CommandError {
     Internal(String),
 }
 
-// Enable Tauri commands to serialize this error to String for the frontend
+// Enable Tauri commands to serialize this error to an object with a message field for the frontend
 impl serde::Serialize for CommandError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("CommandError", 1)?;
+        state.serialize_field("message", &self.to_string())?;
+        state.end()
     }
 }
 
@@ -55,7 +58,9 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
                         }
                     }
                 }
-                SidecarOutputEvent::Terminated(_) => break,
+                SidecarOutputEvent::Terminated(_) => {
+                    // Do not break immediately. Let the stdout task finish reading any buffered output.
+                }
                 _ => {}
             }
         }
@@ -175,6 +180,7 @@ pub async fn process_task(
 
         let mut status_emitted = false;
         let mut stderr_buffer = Vec::<String>::new();
+        let mut exit_code = None;
 
         let process_timeout = app.state::<AppState>().config.process_timeout_secs;
 
@@ -254,27 +260,7 @@ pub async fn process_task(
                             stderr_buffer.push(line_str);
                         }
                         SidecarOutputEvent::Terminated(code) => {
-                            if !status_emitted {
-                                let mut msg = match code {
-                                    Some(c) => format!("进程意外终止，退出码: {}", c),
-                                    None => "进程意外终止".to_string(),
-                                };
-                                if !stderr_buffer.is_empty() {
-                                    msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
-                                }
-                                let payload = ProgressPayload {
-                                    r#type: "progress".to_string(),
-                                    task_id: task_id.clone(),
-                                    status: "error".to_string(),
-                                    message: msg,
-                                    current_page: 0,
-                                    total_pages: 0,
-                                    output_path: None,
-                                };
-                                let _ = app.emit("ocr-progress", payload);
-                                status_emitted = true;
-                            }
-                            break;
+                            exit_code = Some(code);
                         }
                     }
                 }
@@ -297,7 +283,10 @@ pub async fn process_task(
         }
 
         if !status_emitted {
-            let mut msg = "进程意外终止".to_string();
+            let mut msg = match exit_code {
+                Some(Some(c)) => format!("进程意外终止，退出码: {}", c),
+                _ => "进程意外终止".to_string(),
+            };
             if !stderr_buffer.is_empty() {
                 msg.push_str(&format!("。错误日志: {}", stderr_buffer.join(" | ")));
             }
