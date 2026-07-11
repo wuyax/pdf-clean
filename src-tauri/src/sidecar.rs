@@ -56,6 +56,7 @@ pub fn spawn_sidecar(
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn python venv: {}", e))?;
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
         let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
+        let stdin = child.stdin.take();
 
         let tx_out = tx.clone();
         tauri::async_runtime::spawn(async move {
@@ -82,6 +83,7 @@ pub fn spawn_sidecar(
         });
 
         tauri::async_runtime::spawn(async move {
+            let _stdin_keeper = stdin;
             tokio::select! {
                 _ = kill_rx => {
                     let _ = child.kill().await;
