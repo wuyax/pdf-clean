@@ -16,7 +16,7 @@
       </div>
       <div class="w-24 px-4 text-center">类型</div>
       <div class="w-56 px-4 text-center">状态 / 进度</div>
-      <div class="w-10"></div> <!-- Actions column space -->
+      <div class="w-20"></div> <!-- Actions column space -->
     </div>
 
     <!-- Rows -->
@@ -106,8 +106,15 @@
           </span>
         </div>
 
-        <!-- Per-row Action: Remove -->
-        <div class="w-10 flex justify-center opacity-0 group-hover:opacity-100 transition-all duration-200">
+        <!-- Per-row Action: Show Location & Remove -->
+        <div class="w-20 flex justify-center items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+          <button 
+            @click="openFileLocation(task.path)"
+            class="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-all active:scale-90"
+            title="打开文件位置"
+          >
+            <FolderOpen class="w-4 h-4" />
+          </button>
           <button 
             @click="$emit('remove-task', task.path)"
             :disabled="task.status === 'processing'"
@@ -125,6 +132,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Task } from '../types/task';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { 
   Files, 
   FileText, 
@@ -137,7 +145,8 @@ import {
   RefreshCw, 
   Trash2,
   XCircle,
-  Lock
+  Lock,
+  FolderOpen
 } from '@lucide/vue';
 
 const props = defineProps<{
@@ -145,6 +154,14 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['toggle-all', 'remove-task', 'abort-task']);
+
+async function openFileLocation(path: string) {
+  try {
+    await revealItemInDir(path);
+  } catch (e) {
+    console.error('Failed to open file location:', e);
+  }
+}
 
 const allSelected = computed(() => {
   return props.tasks.length > 0 && props.tasks.every(t => t.selected);
