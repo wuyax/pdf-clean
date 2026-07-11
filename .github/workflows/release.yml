@@ -72,11 +72,11 @@ jobs:
         run: |
           cd python-sidecar
           if [ "$RUNNER_OS" == "Windows" ]; then
-            ./venv/Scripts/pyinstaller --clean -y --onefile --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz src/main.py
+            ./venv/Scripts/pyinstaller --clean -y --onefile --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz --exclude-module tkinter --exclude-module unittest --exclude-module test --exclude-module email --exclude-module pydoc src/main.py
             mkdir -p ../src-tauri/binaries
             cp dist/python-sidecar.exe ../src-tauri/binaries/python-sidecar-x86_64-pc-windows-msvc.exe
           else
-            ./venv/bin/pyinstaller --clean -y --onefile --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz src/main.py
+            ./venv/bin/pyinstaller --clean -y --onefile --name "python-sidecar" --collect-all rapidocr_onnxruntime --collect-all onnxruntime --collect-all pyfitz --exclude-module tkinter --exclude-module unittest --exclude-module test --exclude-module email --exclude-module pydoc src/main.py
             mkdir -p ../src-tauri/binaries
             cp dist/python-sidecar ../src-tauri/binaries/python-sidecar-${{ matrix.target }}
           fi
