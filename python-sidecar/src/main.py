@@ -13,9 +13,10 @@ def monitor_parent_death():
     # Exit immediately on EOF
     os._exit(0)
 
-# Start the parent monitor thread as a daemon thread
-t = threading.Thread(target=monitor_parent_death, daemon=True)
-t.start()
+# Start the parent monitor thread as a daemon thread only if not running under pytest
+if "PYTEST_CURRENT_TEST" not in os.environ:
+    t = threading.Thread(target=monitor_parent_death, daemon=True)
+    t.start()
 # Ensure current and parent directories are in path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)

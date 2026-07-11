@@ -7,9 +7,14 @@ from difflib import SequenceMatcher
 
 def get_ocr_for_scan():
     try:
-        from processor import get_ocr
+        try:
+            from processor import get_ocr
+        except ImportError:
+            from src.processor import get_ocr
         return get_ocr()
-    except Exception:
+    except Exception as e:
+        import sys
+        print(f"Error importing/getting OCR: {e}", file=sys.stderr)
         return None
 
 def _classify_page(doc, page_idx: int) -> str:

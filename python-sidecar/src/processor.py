@@ -147,6 +147,8 @@ def process_pdf(input_path: str, output_path: str, progress_callback=None, dpi: 
     2. 将 PDF 页面渲染为低分辨率(100 DPI)图片，传给 PaddleOCR 进行文字识别，大幅降低内存消耗。
     3. 构建新 PDF，贴入高分背景图，并利用 OCR 返回的坐标写入无色文字透明层。
     """
+    if progress_callback:
+        progress_callback(0, 0, "正在加载 AI 识别模型...")
     ocr = get_ocr()
     if ocr is None:
         raise Exception("OCR Engine could not be initialized. Check backend logs.")

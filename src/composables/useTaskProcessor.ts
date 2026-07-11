@@ -188,7 +188,7 @@ export function useTaskProcessor(
 
   async function processSingleTask(task: Task) {
     task.status = 'processing';
-    task.message = '连接后端...';
+    task.message = '正在启动清理引擎...';
 
     try {
       let outputDir = '';
