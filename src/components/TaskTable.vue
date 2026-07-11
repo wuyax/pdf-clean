@@ -14,8 +14,8 @@
         <Files class="w-3.5 h-3.5 mr-1.5 opacity-60" />
         <span>文件名</span>
       </div>
-      <div class="w-24 px-4">类型</div>
-      <div class="w-40 px-4 text-right">状态 / 进度</div>
+      <div class="w-24 px-4 text-center">类型</div>
+      <div class="w-56 px-4 text-center">状态 / 进度</div>
       <div class="w-10"></div> <!-- Actions column space -->
     </div>
 
@@ -48,7 +48,7 @@
         </div>
 
         <!-- Category Tag -->
-        <div class="w-24 px-4">
+        <div class="w-24 px-4 flex justify-center items-center">
           <span 
             :class="categoryClass(task.category)"
             class="px-2 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1 justify-center"
@@ -59,7 +59,7 @@
         </div>
 
         <!-- Progress / Status -->
-        <div class="w-40 px-4 flex flex-col items-end gap-1.5">
+        <div class="w-56 px-4 flex flex-col items-center gap-1.5">
           <div v-if="task.status === 'processing'" class="w-full flex items-center gap-2">
             <div class="flex-1">
               <div class="flex justify-between items-center mb-1 tabular-nums">
@@ -92,7 +92,7 @@
           </div>
 
           <div v-else-if="task.status === 'error'" class="flex items-center gap-1.5 text-rose-500 group-hover:text-rose-600 transition-colors">
-            <span class="text-[10px] font-medium truncate max-w-[140px]" :title="task.message">{{ task.message }}</span>
+            <span class="text-[10px] font-medium truncate max-w-[204px]" :title="task.message">{{ task.message }}</span>
             <AlertCircle class="w-3.5 h-3.5" />
           </div>
 
