@@ -11,18 +11,19 @@ sys.modules['rapidocr_onnxruntime'] = MagicMock()
 python_bin = sys.executable
 main_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src', 'main.py'))
 
-def run_cli_in_process(args):
-    # Save original sys.argv, sys.stdout, sys.stderr
-    orig_argv = sys.argv
+def run_cli_in_process(json_cmd_dict):
+    import io
+    orig_stdin = sys.stdin
     orig_stdout = sys.stdout
     orig_stderr = sys.stderr
 
-    # Redirect stdout and stderr
+    new_stdin = io.StringIO(json.dumps(json_cmd_dict) + "\n")
     new_stdout = io.StringIO()
     new_stderr = io.StringIO()
+
+    sys.stdin = new_stdin
     sys.stdout = new_stdout
     sys.stderr = new_stderr
-    sys.argv = [main_script] + args
 
     code = 0
     try:
@@ -33,18 +34,17 @@ def run_cli_in_process(args):
         import traceback
         new_stderr.write(traceback.format_exc())
         code = 1
-
     finally:
-        # Restore sys.argv, sys.stdout, sys.stderr
-        sys.argv = orig_argv
+        sys.stdin = orig_stdin
         sys.stdout = orig_stdout
         sys.stderr = orig_stderr
 
     return code, new_stdout.getvalue(), new_stderr.getvalue()
 
-def run_cli_subprocess(args):
+def run_cli_subprocess(json_cmd_dict):
     proc = subprocess.run(
-        [python_bin, main_script] + args,
+        [python_bin, main_script],
+        input=json.dumps(json_cmd_dict) + "\n",
         capture_output=True,
         text=True
     )
@@ -52,18 +52,18 @@ def run_cli_subprocess(args):
 
 def test_subprocess_missing_args():
     # Verify running via actual subprocess works for error cases
-    code, out, err = run_cli_subprocess([])
-    assert code == 1
+    code, out, err = run_cli_subprocess({})
+    assert code == 0
     data = json.loads(out.strip())
     assert data["type"] == "error"
-    assert "Missing command" in data["message"]
+    assert "Unknown action" in data["message"]
 
 def test_subprocess_unknown_command():
-    code, out, err = run_cli_subprocess(["unknown"])
-    assert code == 1
+    code, out, err = run_cli_subprocess({"action": "unknown"})
+    assert code == 0
     data = json.loads(out.strip())
     assert data["type"] == "error"
-    assert "Unknown command: unknown" in data["message"]
+    assert "Unknown action: unknown" in data["message"]
 
 def mock_classify_pdf_with_print(path):
     print("Mock print statement to stdout")
@@ -73,7 +73,7 @@ def mock_classify_pdf_with_print(path):
 @patch("src.scanner.classify_pdf", side_effect=mock_classify_pdf_with_print)
 @patch("os.path.exists", return_value=True)
 def test_cli_scan_redirection(mock_exists, mock_classify1, mock_classify2):
-    code, out, err = run_cli_in_process(["scan", "dummy.pdf"])
+    code, out, err = run_cli_in_process({"action": "scan", "paths": ["dummy.pdf"]})
     assert code == 0
     assert "Mock print statement to stdout" in err
     assert "Mock print statement to stdout" not in out
@@ -85,7 +85,7 @@ def test_cli_scan_redirection(mock_exists, mock_classify1, mock_classify2):
 @patch("src.scanner.classify_pdf", return_value="TYPE_1")
 @patch("os.path.exists", return_value=True)
 def test_cli_scan(mock_exists, mock_classify1, mock_classify2):
-    code, out, err = run_cli_in_process(["scan", "dummy.pdf"])
+    code, out, err = run_cli_in_process({"action": "scan", "paths": ["dummy.pdf"]})
     assert code == 0
     data = json.loads(out.strip())
     assert data["type"] == "scan_result"
@@ -97,7 +97,7 @@ def test_cli_scan(mock_exists, mock_classify1, mock_classify2):
 @patch("processor.process_pdf")
 @patch("src.processor.process_pdf")
 def test_cli_process(mock_proc1, mock_proc2, mock_isdir, mock_isfile, mock_exists):
-    code, out, err = run_cli_in_process(["process", "--input", "dummy.pdf", "--output-dir", "/tmp", "--task-id", "t-1"])
+    code, out, err = run_cli_in_process({"action": "process", "input_path": "dummy.pdf", "output_dir": "/tmp", "task_id": "t-1"})
     assert code == 0
     lines = out.strip().split("\n")
     data = json.loads(lines[-1])
@@ -110,8 +110,8 @@ def test_cli_process(mock_proc1, mock_proc2, mock_isdir, mock_isfile, mock_exist
 def test_process_path_traversal_validation(mock_isdir, mock_isfile, mock_exists):
     # If the output directory is not a directory
     mock_isdir.return_value = False
-    code, out, err = run_cli_in_process(["process", "--input", "dummy.pdf", "--output-dir", "/tmp/../etc", "--task-id", "t-1"])
-    assert code == 1
+    code, out, err = run_cli_in_process({"action": "process", "input_path": "dummy.pdf", "output_dir": "/tmp/../etc", "task_id": "t-1"})
+    assert code == 0
     data = json.loads(out.strip())
     assert data["type"] == "error"
     assert "Invalid output directory" in data["message"]
@@ -131,8 +131,8 @@ def test_process_path_traversal_escape(mock_isdir, mock_isfile, mock_exists):
         return real_abspath(path)
 
     with patch("os.path.abspath", side_effect=mock_abspath):
-        code, out, err = run_cli_in_process(["process", "--input", "dummy.pdf", "--output-dir", "/tmp/safe", "--task-id", "t-1"])
-        assert code == 1
+        code, out, err = run_cli_in_process({"action": "process", "input_path": "dummy.pdf", "output_dir": "/tmp/safe", "task_id": "t-1"})
+        assert code == 0
         data = json.loads(out.strip())
         assert data["type"] == "error"
         assert "Path traversal attempt detected" in data["message"]
@@ -152,11 +152,9 @@ def test_process_path_traversal_sibling_bypass(mock_isdir, mock_isfile, mock_exi
         return real_abspath(path)
 
     with patch("os.path.abspath", side_effect=mock_abspath):
-        code, out, err = run_cli_in_process(["process", "--input", "dummy.pdf", "--output-dir", "/tmp/safe", "--task-id", "t-1"])
-        assert code == 1
+        code, out, err = run_cli_in_process({"action": "process", "input_path": "dummy.pdf", "output_dir": "/tmp/safe", "task_id": "t-1"})
+        assert code == 0
         data = json.loads(out.strip())
-
-
         assert data["type"] == "error"
         assert "Path traversal attempt detected" in data["message"]
 
@@ -174,13 +172,13 @@ def test_process_conflict_rename(mock_proc1, mock_proc2, mock_isdir, mock_isfile
         return True
         
     with patch("os.path.exists", side_effect=exists_side_effect):
-        code, out, err = run_cli_in_process([
-            "process",
-            "--input", "dummy.pdf",
-            "--output-dir", "/tmp",
-            "--conflict", "rename",
-            "--task-id", "t-1"
-        ])
+        code, out, err = run_cli_in_process({
+            "action": "process",
+            "input_path": "dummy.pdf",
+            "output_dir": "/tmp",
+            "conflict": "rename",
+            "task_id": "t-1"
+        })
         assert code == 0
         lines = out.strip().split("\n")
         data = json.loads(lines[-1])
