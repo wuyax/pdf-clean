@@ -41,7 +41,6 @@ impl serde::Serialize for CommandError {
 
 #[tauri::command]
 pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json::Value, CommandError> {
-    eprintln!("[Rust Debug] scan_files started with paths: {:?}", paths);
     let mut args = vec!["scan".to_string()];
     args.extend(paths);
 
@@ -55,7 +54,6 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
             while let Some(event) = rx.recv().await {
                 match event {
                     SidecarOutputEvent::Stdout(line_str) => {
-                        eprintln!("[Rust Debug] Sidecar Stdout: {}", line_str.trim());
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line_str) {
                             if val["type"] == "scan_result" {
                                 results = Some(val["results"].clone());
@@ -64,7 +62,6 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
                         }
                     }
                     SidecarOutputEvent::Stderr(line_str) => {
-                        eprintln!("[Rust Debug] Sidecar Stderr: {}", line_str);
                         if let Ok(mut buf) = stderr_buffer.lock() {
                             if buf.len() >= 5 {
                                 buf.remove(0);
@@ -72,9 +69,7 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
                             buf.push(line_str);
                         }
                     }
-                    SidecarOutputEvent::Terminated(code) => {
-                        eprintln!("[Rust Debug] Sidecar Terminated with code: {:?}", code);
-                    }
+                    SidecarOutputEvent::Terminated(_) => {}
                 }
             }
             results
@@ -87,14 +82,13 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
     let results = match tokio::time::timeout(std::time::Duration::from_secs(scan_timeout), run_fut).await {
         Ok(res) => res,
         Err(_) => {
-            eprintln!("[Rust Debug] scan_files timed out!");
             session.kill();
             return Err(CommandError::Timeout(format!("Scan timeout after {} seconds", scan_timeout)));
         }
     };
     session.kill();
     
-    let final_res = results.ok_or_else(|| {
+    results.ok_or_else(|| {
         let logs = if let Ok(buf) = stderr_buffer.lock() {
             buf.join(" | ")
         } else {
@@ -105,13 +99,8 @@ pub async fn scan_files(paths: Vec<String>, app: AppHandle) -> Result<serde_json
         } else {
             format!("Failed to get scan results: {}", logs)
         };
-        eprintln!("[Rust Debug] scan_files returning error: {}", msg);
         CommandError::Internal(msg)
-    });
-    if final_res.is_ok() {
-        eprintln!("[Rust Debug] scan_files succeeded!");
-    }
-    final_res
+    })
 }
 
 #[tauri::command]
