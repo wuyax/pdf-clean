@@ -164,10 +164,15 @@ export function useTaskProcessor(
     isGlobalProcessing.value = true;
     error.value = '';
 
-    const concurrencyLimit = 2;
+    const concurrencyLimit = 1;
     const executing: Promise<void>[] = [];
 
     for (const task of pendingTasks) {
+      // 检查任务是否在排队等待期间被用户取消勾选或从表格中删除了
+      if (!task.selected || !tasks.value.some(t => t.path === task.path)) {
+        continue;
+      }
+
       const p = processSingleTask(task).then(() => {
         // Remove promise from execution pool when completed
         const index = executing.indexOf(p);
